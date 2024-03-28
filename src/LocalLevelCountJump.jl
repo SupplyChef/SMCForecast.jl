@@ -102,7 +102,7 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
     #return rand(truncated(Normal(value, sqrt(system.observation_variance)); lower=0))
 end
 
-function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, state2::SizedVector{3})::Float64
+function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, new_observation, state2::SizedVector{3})::Float64
     time = state1[1]
     value = state1[2]
     state = Int(state1[3])

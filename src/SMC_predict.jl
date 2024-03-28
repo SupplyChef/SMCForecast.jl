@@ -39,13 +39,13 @@ function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=false) where 
         for i in eachindex(smcstates)
             state = smcstates[i]
             
-            new_state_transition_probability = transition_probability(smc.system, state, missing, new_state)
+            new_state_transition_probability = transition_probability(smc.system, state, missing, new_states[i])
             
-            observation_weight::Float64 = new_state_transition_probability / probability
+            observation_weight::Float64 = new_state_transition_probability / sampling_probabilities[i]
 
             weight::Float64 = smcweights[i] * observation_weight
             #println("$new_state; $probability, $new_state_transition_probability; $(smc.weights[i]), $observation_weight")
-            copyto!(smcstates[i], new_state)
+            copyto!(smcstates[i], new_states[i])
             smcweights[i] = weight
 
             weight_sum = weight_sum + weight

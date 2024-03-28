@@ -36,16 +36,7 @@ function fit(::Val{LocalLevel}, values; maxtime=10.0, size=100)
                         :MaxStepsWithoutProgress => 5000,
                         :MaxTime => maxtime)
             )
-    #println(best_fitness(res))
-    #println(best_candidate(res))
-    #xs = best_candidate(res)
-    
-    # res = optimize(get_loss_function(fcs, values), 
-    #                [values[1], var(values), var(values)], 
-    #                Optim.NelderMead(),
-    #                Optim.Options( f_tol=1e-6, g_tol=1e-6, iterations = 10000, show_trace = true))
-    # xs = Optim.minimizer(res)
-    
+
     fcs2 = LocalLevel(xs[1], 
                       abs(xs[2]),
                       abs(xs[3]))

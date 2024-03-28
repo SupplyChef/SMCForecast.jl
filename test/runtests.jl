@@ -8,6 +8,7 @@ using PlotlyJS
 using StaticArrays
 using StatsBase
 
+@testset "Base" begin
 @test begin
     system = System{SizedVector{1}}(x -> Normal(x, 1),
                                     x -> Normal(x, 1),
@@ -53,7 +54,7 @@ end
     SMCForecast.filter!(smc, observations)
     states, weights = SMCForecast.smooth(smc, 100)
 
-    println(states)
+    #println(states)
     true
 end
 
@@ -67,7 +68,7 @@ end
     SMCForecast.filter!(smc, observations)
 
     states = predict_states(smc, 10)
-    println(states)
+    #println(states)
     true
 end
 
@@ -81,10 +82,12 @@ end
     SMCForecast.filter!(smc, observations)
 
     observations = predict_observations(smc, 10)
-    println(observations)
+    #println(observations)
     true
 end
+end
 
+include("test_locallevelcountjump.jl")
 
 # @test begin
 #     using Dates
