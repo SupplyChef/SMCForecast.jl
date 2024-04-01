@@ -9,9 +9,9 @@ struct LocalLevelExplanatory <: SMCSystem{SizedVector{2, Float64, Vector{Float64
 
     prior_distribution
 
-    function LocalLevelExplanatory(exogenous, intercept, coefficients, transition_variance, observation_variance)
+    function LocalLevelExplanatory(exogenous, level0, intercept, coefficients, transition_variance, observation_variance)
         new(exogenous, intercept, coefficients, transition_variance, observation_variance,
-            () -> Uniform(intercept-0.0001, intercept+0.0001))
+            () -> Uniform(level0-0.0001, level0+0.0001))
     end
 end
 
@@ -36,14 +36,13 @@ end
 
 function fit(::Val{LocalLevelExplanatory}, exogenous, values; regularization=0.0, maxtime=120)
     
-    dim = 3 + size(exogenous, 1)
-    
     loss_function = get_loss_function(Val{LocalLevelExplanatory}(), exogenous, values; regularization=regularization)
     
     dim = 4 + size(exogenous, 1)
     xs = bboptimize2(loss_function,
-                    vcat([values[1]], zeros(size(exogenous, 1)), [var(values), var(values)]),
-                    Dict(:SearchRange => vcat([(minimum(values), maximum(values))],
+                    vcat([values[1]], [0.0], zeros(size(exogenous, 1)), [var(values), var(values)]),
+                    Dict(:SearchRange => vcat([(-maximum(values), maximum(values))],
+                                              [(-maximum(values), maximum(values))],
                                               repeat([(minimum(values)-maximum(values), maximum(values)-minimum(values))], size(exogenous, 1)),
                                               [(0.00001, var(values))],
                                               [(0.00001, var(values))]
@@ -53,10 +52,11 @@ function fit(::Val{LocalLevelExplanatory}, exogenous, values; regularization=0.0
                          )
 
     fcs2 = LocalLevelExplanatory(exogenous, 
-                              xs[1], 
-                              xs[2:(1 + size(exogenous, 1))],
-                              abs(xs[1 + size(exogenous, 1) + 1]),
-                              abs(xs[1 + size(exogenous, 1) + 2]))
+                              xs[1],
+                              xs[2], 
+                              xs[3:(2 + size(exogenous, 1))],
+                              abs(xs[2 + size(exogenous, 1) + 1]),
+                              abs(xs[2 + size(exogenous, 1) + 2]))
     return fcs2
 end
 
@@ -64,9 +64,10 @@ function get_loss_function(::Val{LocalLevelExplanatory}, exogenous, values; regu
     return xs -> begin
         fcs2 = LocalLevelExplanatory(exogenous, 
                               xs[1], 
-                              xs[2:(1 + size(exogenous, 1))],
-                              abs(xs[1 + size(exogenous, 1) + 1]),
-                              abs(xs[1 + size(exogenous, 1) + 2]))
+                              xs[2],
+                              xs[3:(2 + size(exogenous, 1))],
+                              abs(xs[2 + size(exogenous, 1) + 1]),
+                              abs(xs[2 + size(exogenous, 1) + 2]))
         smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevelExplanatory}(fcs2, 30)
         filtered_states, likelihood = SMCForecast.filter!(smc, values)
         return -likelihood + regularization * sum(x^2 for x in xs)
@@ -84,12 +85,18 @@ end
 
 function de_exogenous(state::SizedVector, exogenous::Matrix{Float64}, intercept::Float64, coefficients::Vector{Float64})::Float64
     time = Int(state[1])
-    value = state[2] 
+    value = state[2]
+    if time == 0
+        return value - intercept
+    end
     return @inbounds @views value - prodsum(exogenous[:, time], coefficients) - intercept
 end
 
 function re_exogenous(value, time, exogenous, intercept, coefficients)::Float64
-    return @views  value + dot(exogenous[:, time], coefficients) + intercept
+    if time == 0
+        return value + intercept
+    end
+    return @views value + dot(exogenous[:, time], coefficients) + intercept
 end
 
 function sample_initial_state(system::LocalLevelExplanatory, count)
@@ -99,14 +106,15 @@ function sample_initial_state(system::LocalLevelExplanatory, count)
 end
 
 function sample_states(system::LocalLevelExplanatory, 
-                       current_states::Vector{SizedVector{2, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
+                       current_states::Vector{SizedVector{2, Float64, Vector{Float64}}}, 
+                       next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities)
     time = Int(current_states[1][1])
     values = [de_exogenous(current_state, system.exogenous, system.intercept, system.coefficients) for current_state in current_states]
 
     d = Normal(0, sqrt(system.transition_variance))
     ϵs = rand(d, length(new_states))
-    ps = pdf(d, ϵs)
+    ps = map(Base.Fix1(pdf, d), ϵs)
     
     for i in 1:length(new_states)
         new_states[i][1] = time + 1

@@ -1,7 +1,6 @@
 module SMCForecast
 
 using BlackBoxOptim
-using PRIMA
 using DataFrames
 using DataStructures
 using Dates

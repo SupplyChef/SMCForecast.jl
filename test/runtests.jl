@@ -2,6 +2,8 @@ using Test
 
 using SMCForecast
 
+using CSV
+using DataFrames
 using Distributions
 using BlackBoxOptim
 using PlotlyJS
@@ -88,6 +90,7 @@ end
 end
 
 include("test_locallevelcountjump.jl")
+include("test_locallevelexplanatory.jl")
 
 # @test begin
 #     using Dates

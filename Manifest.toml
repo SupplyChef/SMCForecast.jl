@@ -2,7 +2,7 @@
 
 julia_version = "1.9.4"
 manifest_format = "2.0"
-project_hash = "b5ad97bf8a254122a8b20d0ed2179ad2fa0ccf95"
+project_hash = "886e90189292d0b1a0bc3ddd0d6ed697609ce898"
 
 [[deps.ARFFFiles]]
 deps = ["CategoricalArrays", "Dates", "Parsers", "Tables"]
@@ -98,12 +98,6 @@ uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 git-tree-sha1 = "aebf55e6d7795e02ca500a689d326ac979aaf89e"
 uuid = "9718e550-a3fa-408a-8086-8db961cd8217"
 version = "0.1.1"
-
-[[deps.BenchmarkTools]]
-deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
-git-tree-sha1 = "f1dff6729bc61f4d49e140da1af55dcd1ac97b2f"
-uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
-version = "1.5.0"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "2dc09997850d68179b69dafb58ae806167a32b1b"
@@ -918,18 +912,6 @@ git-tree-sha1 = "949347156c25054de2db3b166c52ac4728cbad65"
 uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
 version = "0.11.31"
 
-[[deps.PRIMA]]
-deps = ["LinearAlgebra", "PRIMA_jll", "TypeUtils"]
-git-tree-sha1 = "1293fbede8665647d7fb98f421d72cf38e13854e"
-uuid = "0a7d04aa-8ac2-47b3-b7a7-9dbd6ad661ed"
-version = "0.2.0"
-
-[[deps.PRIMA_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "f7bbf8d5dda12f3f417b350baf82ebf0d190a623"
-uuid = "eead6e0c-2d5b-5641-a95c-b722de96d551"
-version = "0.7.1+0"
-
 [[deps.PackageExtensionCompat]]
 git-tree-sha1 = "fb28e33b8a95c4cee25ce296c817d89cc2e53518"
 uuid = "65ce6f38-6b18-4e1d-a461-8949797d7930"
@@ -1032,10 +1014,6 @@ version = "2.3.1"
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
-
-[[deps.Profile]]
-deps = ["Printf"]
-uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 
 [[deps.ProgressMeter]]
 deps = ["Distributed", "Printf"]
@@ -1338,18 +1316,6 @@ version = "0.4.80"
     LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
     OnlineStatsBase = "925886fa-5bf2-5e8e-b522-a9147a512338"
     Referenceables = "42d2dcc6-99eb-4e98-b66c-637b7d73030e"
-
-[[deps.TypeUtils]]
-deps = ["Requires"]
-git-tree-sha1 = "bdd88868eb3fb29aff042a1f50619b5d0b94a5ea"
-uuid = "c3b1956e-8857-4d84-9b79-890df85b1e67"
-version = "0.3.7"
-
-    [deps.TypeUtils.extensions]
-    TypeUtilsTwoDimensionalExt = "TwoDimensional"
-
-    [deps.TypeUtils.weakdeps]
-    TwoDimensional = "1907e7ba-7586-4310-a2ba-dd01462aeb50"
 
 [[deps.URIs]]
 git-tree-sha1 = "67db6cc7b3821e19ebe75791a9dd19c9b1188f2b"

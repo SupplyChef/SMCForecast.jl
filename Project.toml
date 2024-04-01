@@ -4,7 +4,6 @@ authors = ["SupplyChef <47842426+SupplyChef@users.noreply.github.com>"]
 version = "0.1.0"
 
 [deps]
-BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 BlackBoxOptim = "a134a8b2-14d6-55f6-9291-3336d3ab0209"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
@@ -14,7 +13,6 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MLJ = "add582a8-e3ab-11e8-2d5e-e98b27df1bc7"
 MLJDecisionTreeInterface = "c6f25543-311c-4c74-83dc-3ea6d1015661"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
-PRIMA = "0a7d04aa-8ac2-47b3-b7a7-9dbd6ad661ed"
 PlotlyJS = "f0f68f2c-4968-5e81-91da-67840de0976a"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
