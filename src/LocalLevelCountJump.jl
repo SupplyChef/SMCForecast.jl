@@ -19,6 +19,18 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     end
 end
 
+function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
+    fcs = fit(Val{LocalLevelJump}(), values; maxtime=maxtime, size=size)
+    smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs, 1_000)
+    filter!(smc, values; record=false)
+    obs, weights = predict_observations(smc, horizon)
+    if isa(forecast_percentiles, Real)
+        return percentiles(forecast_percentiles, obs, weights)
+    else
+        return [percentiles(p, obs, weights) for p in forecast_percentiles]
+    end
+end
+
 function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=1000)
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
                     [values[1], 0.00001, var(values), 0.00001, 0.9, 0.5],
