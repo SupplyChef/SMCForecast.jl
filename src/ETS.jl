@@ -1,4 +1,4 @@
-struct ETS <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct ETS <: SMCSystem{SizedVector{3, Float64}}
     level::Float64
     change::Float64
     
@@ -18,7 +18,7 @@ end
 
 function forecast(::Val{ETS}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
     fcs = fit(Val{ETS}(), values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64, Vector{Float64}}, ETS}(fcs, 1_000)
+    smc = SMC{SizedVector{3, Float64}, ETS}(fcs, 1_000)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -55,20 +55,20 @@ end
 function get_loss_function(::Val{ETS}, values; size=100, regularization=0.0)
     return xs -> begin
         fcs2 = ETS(xs[1], xs[2], abs(xs[3]), abs(xs[4]), abs(xs[5]), true)
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, ETS}(fcs2, size)
+        smc = SMC{SizedVector{3, Float64}, ETS}(fcs2, size)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
 end
 
-function sample_initial_state(system::ETS, count)
-    states = [SizedVector{3, Float64, Vector{Float64}}(0, r, 0.0) for r in rand(system.prior_distribution(), count)]
+function sample_initial_state(system::ETS, count; rng=Random.default_rng())
+    states = [SizedVector{3, Float64}(0, r, 0.0) for r in rand(rng, system.prior_distribution(), count)]
     return states
 end
 
 function sample_states(system::ETS, 
-                      current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
-                      new_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, sampling_probabilities::Array{Float64, 1})
+                      current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
+                      new_states::Vector{SizedVector{3, Float64}}, sampling_probabilities::Array{Float64, 1})
     time::Int64 = Int(current_states[1][1])
     
     finish::Int64 = length(new_states)
@@ -77,10 +77,10 @@ function sample_states(system::ETS,
     #level_ϵs::Array{Float64, 1} = Float64[]
     if ismissing(next_observation)
         #level_ϵs = rand(level_n, finish)
-        sampling_probabilities .= rand(level_n, finish)
+        sampling_probabilities .= 1
     else
         #level_ϵs = rand.(level_ns)
-        sampling_probabilities .= rand.(level_n, finish)
+        sampling_probabilities .= 1
     end
 
     change_n = Normal(0, sqrt(system.change_sensitivity))
@@ -122,9 +122,9 @@ function sample_observation(system::ETS, current_state::SizedVector{3})
 end
 
 function transition_probability(system::ETS, 
-                                state::SizedVector{3, Float64, Vector{Float64}}, 
+                                state::SizedVector{3, Float64}, 
                                 new_observation,
-                                new_state::SizedVector{3, Float64, Vector{Float64}})::Float64
+                                new_state::SizedVector{3, Float64})::Float64
     time = state[1]
     level::Float64 = state[2]
     change::Float64 = state[3]
@@ -150,12 +150,12 @@ function transition_probability(system::ETS,
                                  new_change)
 end
 
-function observation_probability(system::ETS, state::SizedVector{3, Float64, Vector{Float64}}, observation::Float64)::Float64
+function observation_probability(system::ETS, state::SizedVector{3, Float64}, observation::Float64)::Float64
     value::Float64 = state[2]
     t = Normal(value, sqrt(system.observation_sensitivity))
     return pdf(t, observation)
 end
 
 function average_state(system::ETS, states, weights)
-    return SizedVector{3, Float64, Vector{Float64}}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights))])
+    return SizedVector{3, Float64}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights))])
 end

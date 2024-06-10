@@ -19,11 +19,13 @@ export ForecastSystem
 export LocalLevel
 export LocalLevelChange
 export LocalLevelJump
+export LocalLevelCountJumpExplanatory
 export LocalLevelRegressor
 export LocalLevelExplanatory
 export LocalLevelJumpExplanatory
 
 export forecast
+export initialize!
 export filter!
 export smooth
 export predict_states
@@ -50,7 +52,8 @@ include("LocalLevelChange.jl")
 include("LocalLevelRegressor.jl")
 include("LocalLevelExplanatory.jl")
 include("LocalLevelCountJump.jl")
-include("LocalLevelJumpExplanatory.jl")
+#include("LocalLevelJumpExplanatory.jl")
+include("LocalLevelCountJumpExplanatory.jl")
 include("SMC_predict.jl")
 
 function rand(system::System{SizedVector{1}}, count::Integer)

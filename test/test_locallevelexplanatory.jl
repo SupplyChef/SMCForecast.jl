@@ -1,11 +1,18 @@
-@testset "LocalLevelExplanatory" begin
+@testitem "LocalLevelExplanatory" begin
+    using SMCForecast
+    using CSV
+    using DataFrames
+    using Distributions
+    using Random
+    using StaticArrays
+
     @test begin
-        drivers = CSV.read(raw"..\datasets\front_rear_seat.csv", DataFrame);
+        drivers = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\front_rear_seat.csv", DataFrame);
         exogenous = [mod1(j, 12) == i for i in 2:12, j in 1:length(drivers.british_drivers_KSI)+200] * 1.0
 
         fcs2 = SMCForecast.fit(Val{LocalLevelExplanatory}(), exogenous, drivers.british_drivers_KSI; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevelExplanatory}(fcs2, 1000)
+        smc = SMC{SizedVector{2, Float64}, LocalLevelExplanatory}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, drivers.british_drivers_KSI)
         println(loglikelihood)
 

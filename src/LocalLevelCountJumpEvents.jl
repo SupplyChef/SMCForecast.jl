@@ -1,4 +1,4 @@
-struct LocalLevelJumpExplanatory <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct LocalLevelCountJumpEvents <: SMCSystem{SizedVector{3, Float64}}
     exogenous::Matrix{Float64}
 
     level1::Float64
@@ -13,16 +13,16 @@ struct LocalLevelJumpExplanatory <: SMCSystem{SizedVector{3, Float64, Vector{Flo
     level_variance::Float64
     observation_variance::Float64
 
-    function LocalLevelJumpExplanatory(exogenous, level1, level2, level_matrix, intercept, coefficients, level_variance, observation_variance)
+    function LocalLevelCountJumpEvents(exogenous, level1, level2, level_matrix, intercept, coefficients, level_variance, observation_variance)
         levels = [1,2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         new(exogenous, level1, level2, level_matrix, levels, level_weights, intercept, coefficients, level_variance, observation_variance)
     end
 end
 
-function fit2(::Val{LocalLevelJumpExplanatory}, exogenous, values; regularization=0.0, maxtime=10)
+function fit2(::Val{LocalLevelCountJumpEvents}, exogenous, values; regularization=0.0, maxtime=10)
     dim = 4 + size(exogenous, 1)
-    res = bboptimize(get_loss_function(Val{LocalLevelJumpExplanatory}(), exogenous, values; regularization=regularization); 
+    res = bboptimize(get_loss_function(Val{LocalLevelCountJumpEvents}(), exogenous, values; regularization=regularization); 
                     SearchRange = (-50.0, 50.0), 
                     NumDimensions = dim, 
                     MaxTime = maxtime)
@@ -42,10 +42,10 @@ function fit2(::Val{LocalLevelJumpExplanatory}, exogenous, values; regularizatio
     return fcs2
 end
 
-function fit(::Val{LocalLevelJumpExplanatory}, exogenous, values; regularization=0.0, maxtime=10)
+function fit(::Val{LocalLevelCountJumpEvents}, exogenous, values; regularization=0.0, maxtime=10)
     dim = 4 + size(exogenous, 1)
     
-    loss_function = get_loss_function(Val{LocalLevelJumpExplanatory}(), exogenous, values; regularization=regularization)
+    loss_function = get_loss_function(Val{LocalLevelCountJumpEvents}(), exogenous, values; regularization=regularization)
     xs = zeros(dim)
     
     last_xs = copy(xs)
@@ -95,9 +95,9 @@ function fit(::Val{LocalLevelJumpExplanatory}, exogenous, values; regularization
     return fcs2, historical_xs
 end
 
-function get_loss_function(::Val{LocalLevelJumpExplanatory}, exogenous, values; regularization=0.0)
+function get_loss_function(::Val{LocalLevelCountJumpEvents}, exogenous, values; regularization=0.0)
     return xs -> begin
-        fcs2 = LocalLevelJumpExplanatory(exogenous, 
+        fcs2 = LocalLevelCountJumpEvents(exogenous, 
                               xs[1], 
                               0.0, 
                               [0.9 0.1; 0.9 0.1],
@@ -105,19 +105,19 @@ function get_loss_function(::Val{LocalLevelJumpExplanatory}, exogenous, values; 
                               xs[3:(2 + size(exogenous, 1))],
                               abs(xs[2 + size(exogenous, 1) + 1]),
                               abs(xs[2 + size(exogenous, 1) + 2]))
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJumpExplanatory}(fcs2, 30)
+        smc = SMC{SizedVector{3, Float64}, LocalLevelCountJumpEvents}(fcs2, 30)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
 end
 
-function sample_initial_state(system::LocalLevelJumpExplanatory, count)::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
+function sample_initial_state(system::LocalLevelCountJumpEvents, count)::Array{SizedVector{3, Float64}, 1}
     states = sample([1,2], pweights([0.9, 0.1]), count)
-    return [SizedVector{3, Float64, Vector{Float64}}([0, system.level1, states[i]]) for i in eachindex(states)]
+    return [SizedVector{3, Float64}([0, system.level1, states[i]]) for i in eachindex(states)]
 end
 
-function sample_states(system::LocalLevelJumpExplanatory, 
-                      current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
+function sample_states(system::LocalLevelCountJumpEvents, 
+                      current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
                       new_states, sampling_probabilities)
     time = Int(current_states[1][1])
 
@@ -137,11 +137,11 @@ function sample_states(system::LocalLevelJumpExplanatory,
         new_states[i][2] = re_exogenous(new_value, time + 1, system.exogenous, system.intercept, system.coefficients)
         new_states[i][3] = new_state
 
-        sampling_probabilities[i] = system.level_matrix[state, new_state] * p
+        sampling_probabilities[i] = 1
     end
 end
 
-function sample_observation(system::LocalLevelJumpExplanatory, current_state::SizedVector{3})
+function sample_observation(system::LocalLevelCountJumpEvents, current_state::SizedVector{3})
     time = Int(current_state[1])
     value = current_state[2]
     state = Int(current_state[3])
@@ -153,7 +153,7 @@ function sample_observation(system::LocalLevelJumpExplanatory, current_state::Si
     return rand(Normal(value, sqrt(system.observation_variance)))
 end
 
-function transition_probability(system::LocalLevelJumpExplanatory, state1::SizedVector{3, Float64, Vector{Float64}}, observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelCountJumpEvents, state1::SizedVector{3, Float64}, observation, state2::SizedVector{3, Float64})::Float64
     time = Int(state1[1])
     value = de_exogenous(state1, system.exogenous, system.intercept, system.coefficients)
     state = Int(state1[3])
@@ -164,7 +164,7 @@ function transition_probability(system::LocalLevelJumpExplanatory, state1::Sized
     return system.level_matrix[state, new_state] * Distributions.normpdf(value, sqrt(system.level_variance), new_value)
 end
 
-function observation_probability(system::LocalLevelJumpExplanatory, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
+function observation_probability(system::LocalLevelCountJumpEvents, current_state::SizedVector{3, Float64}, current_observation)::Float64
     time = Int(current_state[1])
     value = current_state[2]
     state = Int(current_state[3])
@@ -176,7 +176,7 @@ function observation_probability(system::LocalLevelJumpExplanatory, current_stat
     return Distributions.normpdf(value, sqrt(system.observation_variance), current_observation)
 end
 
-function average_state(system::LocalLevelJumpExplanatory, states, weights)
+function average_state(system::LocalLevelCountJumpEvents, states, weights)
     return SizedVector{3}([states[1][1], 
                            sum(states[i][2] * weights[i] for i in eachindex(weights)), 
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])

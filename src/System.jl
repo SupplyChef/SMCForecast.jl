@@ -14,10 +14,9 @@ function sample_states(system::System{SizedVector{1}},
     for (i, current_state) in enumerate(current_states)
         d = system.transition_distribution(current_state[1])
         x = rand(d)
-        p = pdf(d, x)
 
         new_states[i][1] = x
-        sampling_probabilities[i] = p
+        sampling_probabilities[i] = 1
     end
 end
 
@@ -29,8 +28,8 @@ function transition_probability(system, state, observation, new_state)
     throw(ErrorException("Invalid"))
 end
 
-function sample_initial_state(system::System{SizedVector{1}}, count)
-    return SizedVector{1}.(rand(system.prior_distribution, count))
+function sample_initial_state(system::System{SizedVector{1}}, count; rng=Random.default_rng())
+    return SizedVector{1}.(rand(rng, system.prior_distribution, count))
 end
 
 function transition_probability(system::System{SizedVector{1}}, state::SizedVector{1}, observation, new_state::SizedVector{1}) 

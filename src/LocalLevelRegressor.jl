@@ -1,7 +1,7 @@
 """
 Local level model with regressors
 """
-struct LocalLevelRegressor <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct LocalLevelRegressor <: SMCSystem{SizedVector{3, Float64}}
     level::Float64
     change::Float64
     regressor
@@ -23,7 +23,7 @@ Forecasts future values at the given percentiles
 """
 function forecast(::Val{LocalLevelRegressor}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
     fcs = fit(Val{LocalLevelRegressor}(), values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelRegressor}(fcs, size)
+    smc = SMC{SizedVector{3, Float64}, LocalLevelRegressor}(fcs, size)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -62,19 +62,19 @@ end
 function get_loss_function(::Val{LocalLevelRegressor}, mach, values; size=100)
     return xs -> begin
         fcs2 = LocalLevelRegressor(xs[1], 0.0, mach, abs(xs[2]), abs(xs[3]))
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelRegressor}(fcs2, size)
+        smc = SMC{SizedVector{3, Float64}, LocalLevelRegressor}(fcs2, size)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood
     end
 end
 
-function sample_initial_state(system::LocalLevelRegressor, count)
-    states = [SizedVector{3, Float64, Vector{Float64}}(0, r, 0.0) for r in rand(system.prior_distribution(), count)]
+function sample_initial_state(system::LocalLevelRegressor, count; rng=Random.default_rng())
+    states = [SizedVector{3, Float64}(0, r, 0.0) for r in rand(rng, system.prior_distribution(), count)]
     return states
 end
 
 function sample_states(system::LocalLevelRegressor, 
-                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
+                       current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities)
     time = Int(current_states[1][1])
     values = [current_state[2] for current_state in current_states]
@@ -92,7 +92,7 @@ function sample_states(system::LocalLevelRegressor,
         new_states[i][2] = values[i] + new_changes[i] + ϵs[i]
         new_states[i][3] = ϵs[i]
     end
-    sampling_probabilities .= ps
+    sampling_probabilities .= 1
 end
 
 function sample_observation(system::LocalLevelRegressor, current_state::SizedVector{3})
@@ -101,7 +101,7 @@ function sample_observation(system::LocalLevelRegressor, current_state::SizedVec
     return rand(n)
 end
 
-function transition_probability(system::LocalLevelRegressor, state::SizedVector{3, Float64, Vector{Float64}}, new_state::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelRegressor, state::SizedVector{3, Float64}, new_state::SizedVector{3, Float64})::Float64
     time = state[1]
     value::Float64 = state[2]
     change::Float64 = state[3]
@@ -115,12 +115,12 @@ function transition_probability(system::LocalLevelRegressor, state::SizedVector{
                                  new_value)
 end
 
-function observation_probability(system::LocalLevelRegressor, state::SizedVector{3, Float64, Vector{Float64}}, observation::Float64)::Float64
+function observation_probability(system::LocalLevelRegressor, state::SizedVector{3, Float64}, observation::Float64)::Float64
     value::Float64 = state[2]
     t = Normal(value, sqrt(system.observation_variance))
     return pdf(t, observation)
 end
 
 function average_state(system::LocalLevelRegressor, states, weights)
-    return SizedVector{3, Float64, Vector{Float64}}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights))])
+    return SizedVector{3, Float64}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights))])
 end

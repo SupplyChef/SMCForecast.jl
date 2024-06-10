@@ -1,3 +1,5 @@
+using Random
+
 """
 Particle filter
 """
@@ -16,13 +18,15 @@ mutable struct SMC{T <: SizedVector, U <: SMCSystem{T}}
     historical_proposed_weights::Array{Array{Float64, 1}, 1}
 
     function SMC{T, U}(system::U, count::Int64) where U <: SMCSystem{T} where T <: SizedVector
-        smc = new{T, U}(system, [T(zeros(Float64, size(T, 1))) for i in 1:count], zeros(Float64, count), Array{T, 1}[], Array{Float64, 1}[], Array{T, 1}[], Array{Float64, 1}[])
+        smc = new{T, U}(system, 
+                        T[T(zeros(size(T, 1))) for i in 1:count], 
+                        zeros(Float64, count), 
+                        Array{T, 1}[], 
+                        Array{Float64, 1}[], 
+                        Array{T, 1}[], 
+                        Array{Float64, 1}[])
         return smc
     end
-end
-
-function initialize!(smc::SMC{T, U}, new_state) where {T <: SizedVector, U <: SMCSystem{T}} 
-    copyto!(new_state, sample_initial_state(smc.system, 1)[1])
 end
 
 """
@@ -30,10 +34,10 @@ end
 
 Initializes the particle filter.
 """
-function initialize!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMCSystem{T}} 
-    smc.states .= sample_initial_state(smc.system, length(smc.states))
+function initialize!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
+    smc.states .= sample_initial_state(smc.system, length(smc.states); rng=rng)
     #smc.weights .= repeat([1.0 / length(smc.states)], length(smc.states))
-    smc.weights .= repeat([1.0], length(smc.states))
+    smc.weights .= repeat([1.0], length(smc.weights))
 end
 
 """
@@ -66,52 +70,41 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
     filtered_states = []
     smc.observation_likelihood = zeros(length(observations))
     
-    new_states = [T(zeros(size(T, 1))) for i in 1:length(smc.states)]
+    new_states = T[T(zeros(size(T, 1))) for i in 1:length(smc.states)]
     sampling_probabilities = [1.0 for i in 1:length(smc.states)]
-    new_state_transition_probabilities = [1.0 for i in 1:length(smc.states)]
     for (j, observation) in enumerate(observations)
         weight_sum::Float64 = 0.0
 
         if j == 1
-            for i in eachindex(smc.states)
-                initialize!(smc, new_states[i])
-                smc.weights[i] = 1.0
-                sampling_probabilities[i] = 1.0
-                new_state_transition_probabilities[i] = 1.0
-            end
+            new_states = sample_initial_state(smc.system, length(new_states))
+            smc.weights .= 1.0
+            sampling_probabilities .= 1.0
         else
             sample_states(smc.system, smc.states, observation, new_states, sampling_probabilities)
             #println("New states: $new_states")
             #println("New states sampling probabilities: $sampling_probabilities")
-            for i in eachindex(smc.states)
-                new_state_transition_probabilities[i] = transition_probability(smc.system, smc.states[i], observation, new_states[i])
-            end
         end
 
         for i in eachindex(smc.states)
             new_state_observation_probability = 1.0
             if !ismissing(observation)
-                new_state_observation_probability = observation_probability(smc.system, new_states[i], observation)
+                @inbounds new_state_observation_probability = observation_probability(smc.system, new_states[i], observation)
             end
             
-            oversampling_correction = new_state_transition_probabilities[i] / sampling_probabilities[i]
-            observation_weight::Float64 = oversampling_correction * new_state_observation_probability
+            observation_weight::Float64 = sampling_probabilities[i] * new_state_observation_probability
 
-            #if !(oversampling_correction ≈ 1)
-            #    println("Problem with weight correction: $(smc.states[i]) -> $(new_states[i]), $(new_state_transition_probabilities[i]) / $(sampling_probabilities[i]) = $oversampling_correction")
-            #end
-            if isinf(sampling_probabilities[i]) && isinf(new_state_transition_probability)
+            if isinf(sampling_probabilities[i])
                 #println("Warning: Inf")
                 observation_weight = new_state_observation_probability
             end
-            if isnan(observation_weight) || isinf(observation_weight)
-                #println("Problem with observation weight: $(smc.states[i]) -> $(new_states[i]); $sampling_probability, $(new_state_transition_probabilitis[i]) $new_state_observation_probability; $(smc.weights[i]), $observation_weight")
+            if isnan(observation_weight) || isinf(observation_weight) || (observation_weight == 0)
+                #println("Problem with observation weight: $(smc.states[i]) -> $(new_states[i]); $(smc.weights[i]), $new_state_observation_probability, $observation")
                 observation_weight = 0
             end
 
             weight::Float64 = smc.weights[i] * observation_weight
             
-            copyto!(smc.states[i], new_states[i])
+            @inbounds copyto!(smc.states[i], new_states[i])
             #println("$(Base.objectid(smc.states[i])) $(Base.objectid(new_state))")
             smc.weights[i] = weight
             #println("$(smc.states[i]) $(smc.weights[i])")
@@ -121,7 +114,7 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
             #println("$j $i, $state $observation, $observation_weight")
         end
 
-        #println("step: $j, likelihood: $observation_weight_sum")
+        #println("step: $j, likelihood: $weight_sum")
         smc.observation_likelihood[j] = weight_sum
 
         #println("Weights: $(smc.weights)")
@@ -217,7 +210,7 @@ function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCS
     return all_smoothed_states
 end
 
-function bboptimize2(f, x0, params; quiet=true)
+function bboptimize2(f, x0, params; quiet=false, pool_size=20)
     start = Dates.now()
     latest = start
 
@@ -232,7 +225,6 @@ function bboptimize2(f, x0, params; quiet=true)
     
     last_progress = 0
     
-    pool_size = 6
     candidate_pool = vcat([x0], [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size-1])
     #candidate_pool = [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size]
     #println(candidate_pool)
