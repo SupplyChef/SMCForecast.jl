@@ -1,6 +1,5 @@
 module SMCForecast
 
-using BlackBoxOptim
 using DataFrames
 using DataStructures
 using Dates
@@ -11,7 +10,6 @@ using StatsBase
 using StaticArrays
 using Distributions
 import Distributions:rand
-import BlackBoxOptim:bboptimize
 
 export SMC
 export System

@@ -6,7 +6,6 @@ using SMCForecast
 using CSV
 using DataFrames
 using Distributions
-using BlackBoxOptim
 using PlotlyJS
 using Random
 using StaticArrays
@@ -79,9 +78,6 @@ end
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations)
 
-        #println(observations)
-        #println(filtered_states)
-
         filtered_states[end][1] > 19 && filtered_states[end][1] < 21
     end
 
@@ -93,9 +89,6 @@ end
 
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations; record=false)
-
-        #println(observations)
-        #println(filtered_states)
 
         filtered_states[end][1] > 19 && filtered_states[end][1] < 21
     end
@@ -117,9 +110,6 @@ end
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations)
         smoothed_states = smooth(smc, 100)
-
-        #println(observations)
-        #println(mean(x -> x[end][1], smoothed_states))
         
         mean(x -> x[end][1], smoothed_states) > 19 && mean(x -> x[end][1], smoothed_states) < 21
     end
@@ -133,7 +123,8 @@ end
     using StaticArrays
 
     @test begin
-        data = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\nile.csv", DataFrame).flow
+        println(pwd())
+        data = CSV.read(raw"..\datasets\nile.csv", DataFrame).flow
 
         fcs = SMCForecast.fit(Val{LocalLevel}(), data; maxtime=60, size=100)
 
@@ -199,58 +190,9 @@ end
     end
 end
 
-# @test begin
-#     system_generator(θ) = begin 
-#                     return System{SizedVector{1}}(x -> θ * x + Normal(0, 1),
-#                                                   x -> x + Normal(0, 1),
-#                                                   Uniform(1, 1.001))
-#     end
-
-#     system = system_generator(0.9)
-#     observations = rand(system, 100)
-    
-#     for θ in 0.5:0.1:1
-#         print("$θ ")
-#         system = system_generator(θ)
-#         smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 100)
-#         SMCForecast.filter!(smc, observations)
-#     end
-
-#     true
-# end
-
-# @test begin
-#     system = System{SizedVector{1}}(x -> Normal(x, 1),
-#                                     x -> Normal(x, 1),
-#                                     Uniform(0, 1))
-#     smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
-
-#     observations = [0 + 0.01 * i for i in 1:200]
-#     SMCForecast.filter!(smc, observations)
-
-#     states = predict_states(smc, 10)
-#     #println(states)
-#     true
-# end
-
-# @test begin
-#     system = System{SizedVector{1}}(x -> Normal(x, 1),
-#                                     x -> Normal(x, 1),
-#                                     Uniform(0, 1))
-#     smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
-
-#     observations = [0 + 0.01 * i for i in 1:200]
-#     SMCForecast.filter!(smc, observations)
-
-#     observations = predict_observations(smc, 10)
-#     #println(observations)
-#     true
-# end
-
 include("test_locallevelcountjump.jl")
 include("test_locallevelexplanatory.jl")
-
-include("m5_competition.jl")
+#include("m5_competition.jl")
 
 # @test begin
 #     using Dates

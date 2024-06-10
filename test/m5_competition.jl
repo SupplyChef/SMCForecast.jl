@@ -1,10 +1,11 @@
-sales = CSV.read(raw"C:\Users\renau\Downloads\m5-forecasting-uncertainty\sales_train_evaluation.csv", DataFrame)
+println(pwd())
+sales = CSV.read(raw"..\datasets\m5-forecasting-uncertainty\sales_train_evaluation.csv", DataFrame)
 sales2 = stack(sales, 7:1947)
 
-calendar = CSV.read(raw"C:\Users\renau\Downloads\m5-forecasting-uncertainty\calendar.csv", DataFrame)
+calendar = CSV.read(raw"..\datasets\m5-forecasting-uncertainty\calendar.csv", DataFrame)
 sales3 = innerjoin(sales2, calendar, on=:variable=>:d)
 
-prices = CSV.read(raw"C:\Users\renau\Downloads\m5-forecasting-uncertainty\sell_prices.csv", DataFrame)
+prices = CSV.read(raw"..\datasets\m5-forecasting-uncertainty\sell_prices.csv", DataFrame)
 sales4 = innerjoin(sales3, prices, on=[:store_id, :item_id, :wm_yr_wk])
 
 gd = first(groupby(sales4, :id), 30)

@@ -7,7 +7,7 @@
     using StaticArrays
 
     @test begin
-        drivers = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\front_rear_seat.csv", DataFrame);
+        drivers = CSV.read(raw"..\datasets\front_rear_seat.csv", DataFrame);
         exogenous = [mod1(j, 12) == i for i in 2:12, j in 1:length(drivers.british_drivers_KSI)+200] * 1.0
 
         fcs2 = SMCForecast.fit(Val{LocalLevelExplanatory}(), exogenous, drivers.british_drivers_KSI; regularization=0.01, maxtime=60)
