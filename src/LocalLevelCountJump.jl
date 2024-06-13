@@ -78,7 +78,7 @@ function sample_states(system::LocalLevelJump,
         value = current_state[2]
         state = Int(current_state[3])
         
-        n = truncated(Normal(0, sqrt(system.level_variance)); lower=-min(value, system.level2)+0.001)
+        n = truncated(Normal(0, sqrt(system.level_variance)); lower=-(value - system.level2)+0.001)
 
         new_state = sample(rng, system.levels, system.level_weights[state])
         if happy_only
@@ -107,7 +107,7 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
 
     value = max(value, 0.0001)
     p = system.observation_variance
-    return rand(rng, NegativeBinomial(value * p / ( 1 - p), p))
+    return rand(rng, NegativeBinomial(value * p / (1 - p), p))
 end
 
 function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, new_observation, state2::SizedVector{3})::Float64
@@ -118,7 +118,7 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
     new_value = state2[2]
     new_state = Int(state2[3])
 
-    n = truncated(Normal(0, sqrt(system.level_variance)); lower=-min(value, system.level2)+0.001)
+    n = truncated(Normal(0, sqrt(system.level_variance)); lower=-(value - system.level2)+0.001)
     
     p = pdf(n, new_value - value)
     probability = system.level_matrix[state, new_state] * p
@@ -140,7 +140,7 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
     value = max(value, 0.0001)
     p = system.observation_variance
     #println("$value, $p, $current_observation, $(pdf(NegativeBinomial(value * p / ( 1 - p), p), current_observation))")
-    return pdf(NegativeBinomial(value * p / ( 1 - p), p), current_observation) 
+    return pdf(NegativeBinomial(value * p / (1 - p), p), current_observation) 
 end
 
 function average_state(system::LocalLevelJump, states, weights)
