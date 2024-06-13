@@ -1,5 +1,5 @@
 
-struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64}}
+struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     level1::Float64
     level2::Float64
     
@@ -58,7 +58,7 @@ function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, si
                             1-xs[6] xs[6]],
                             abs(xs[3]),
                             abs(xs[4]))
-        smc = SMC{SizedVector{3, Float64}, LocalLevelJump}(fcs2, size)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs2, size)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
@@ -66,11 +66,11 @@ end
 
 function sample_initial_state(system::LocalLevelJump, count; rng=Random.default_rng())
     states = sample(rng, [1,2], system.level_weights10, count)
-    return [SizedVector{3, Float64}(1.0, system.level1, states[i]) for i in eachindex(states)]
+    return [SizedVector{3, Float64, Vector{Float64}}(1.0, system.level1, states[i]) for i in eachindex(states)]
 end
 
 function sample_states(system::LocalLevelJump, 
-                       current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
+                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
     time = Int(current_states[1][1])
 
@@ -144,7 +144,7 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
 end
 
 function average_state(system::LocalLevelJump, states, weights)
-    return SizedVector{3, Float64}([states[1][1], 
+    return SizedVector{3, Float64, Vector{Float64}}([states[1][1], 
                            sum(states[i][2] * weights[i] for i in eachindex(weights)),
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])
 end
