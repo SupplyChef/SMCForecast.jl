@@ -12,7 +12,7 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64}}
     observation_variance::Float64
 
     function LocalLevelJump(level1, level2, level_matrix, level_variance, observation_variance)
-        levels = [1,2]
+        levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
         new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance)
@@ -78,7 +78,7 @@ function sample_states(system::LocalLevelJump,
         value = current_state[2]
         state = Int(current_state[3])
         
-        n = truncated(Normal(0, sqrt(system.level_variance)); lower=-value+0.001)
+        n = truncated(Normal(0, sqrt(system.level_variance)); lower=-min(value, system.level2)+0.001)
 
         new_state = sample(rng, system.levels, system.level_weights[state])
         if happy_only
@@ -118,7 +118,7 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
     new_value = state2[2]
     new_state = Int(state2[3])
 
-    n = truncated(Normal(0, sqrt(system.level_variance)); lower=-value+0.001)
+    n = truncated(Normal(0, sqrt(system.level_variance)); lower=-min(value, system.level2)+0.001)
     
     p = pdf(n, new_value - value)
     probability = system.level_matrix[state, new_state] * p
