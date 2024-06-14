@@ -89,7 +89,7 @@ function sample_states(system::LocalLevelJump,
             end        
         end
         ϵ = rand(rng, n)
-        new_value = value + ϵ
+        new_value = max(value + ϵ, system.level2)
 
         new_states[i][1] = time + 1
         new_states[i][2] = new_value
@@ -107,8 +107,9 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
         return rand(rng, Poisson(system.level2))
     end
 
+    value = max(value, 0.0001)
     p = system.observation_variance
-    return rand(rng, NegativeBinomial((system.level2 + exp(value)) * p / (1 - p), p))
+    return rand(rng, NegativeBinomial(value * p / (1 - p), p))
 end
 
 function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, new_observation, state2::SizedVector{3})::Float64
@@ -120,8 +121,11 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
     new_state = Int(state2[3])
 
     n = Normal(0, sqrt(system.level_variance))
-    
-    p = pdf(n, new_value - value)
+    if new_value > system.level2
+        p = pdf(n, new_value - value)
+    else
+        p = cdf(n, new_value - value)
+    end
     probability = system.level_matrix[state, new_state] * p
     if isinf(probability) || isnan(probability)
         #println("$probability, $state1, $state2")
@@ -138,9 +142,10 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
         return pdf(Poisson(system.level2), current_observation)
     end
 
+    value = max(value, 0.0001)
     p = system.observation_variance
     #println("$value, $p, $current_observation, $(pdf(NegativeBinomial(value * p / ( 1 - p), p), current_observation))")
-    return pdf(NegativeBinomial((system.level2 + exp(value)) * p / (1 - p), p), current_observation) 
+    return pdf(NegativeBinomial(value * p / (1 - p), p), current_observation) 
 end
 
 function average_state(system::LocalLevelJump, states, weights)
