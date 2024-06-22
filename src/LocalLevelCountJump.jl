@@ -31,7 +31,9 @@ function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500
     end
 end
 
-function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=100, min_observation_variance=0.00001)
+function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=100, 
+                                    min_observation_variance=0.00001,
+                                    best_callback=nothing)
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
                     [values[1], 0.00001, var(values) / length(values), 0.99, 0.001, 0.1],
                     Dict(
@@ -40,7 +42,8 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                                      (0.0001, .9999), (0.0001, .9999)], 
                     :NumDimensions => dim, 
                     :MaxTime => maxtime,
-                    :MaxStepsWithoutProgress => 2000)
+                    :MaxStepsWithoutProgress => 2000),
+                    best_callback = best_callback
                     )
     
     fcs2 = LocalLevelJump(xs[1], 

@@ -36,15 +36,18 @@ export MASE
 export sMAPE
 export coverage
 
+export single_order
+export evaluate_order
+
 export get_loss_function
 
 RandomForestRegressor = @load RandomForestRegressor pkg=DecisionTree
 
 abstract type ForecastSystem end
 
-include("Metrics.jl")
 include("System.jl")
 include("SMC.jl")
+
 include("LocalLevel.jl")
 include("LocalLevelChange.jl")
 include("LocalLevelRegressor.jl")
@@ -52,7 +55,10 @@ include("LocalLevelExplanatory.jl")
 include("LocalLevelCountJump.jl")
 #include("LocalLevelJumpExplanatory.jl")
 include("LocalLevelCountJumpExplanatory.jl")
-include("SMC_predict.jl")
+
+include("Metrics.jl")
+include("Order.jl")
+include("Predict.jl")
 
 function rand(system::System{SizedVector{1}}, count::Integer)
     ys = zeros(count)

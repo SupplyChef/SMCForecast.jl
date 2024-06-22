@@ -210,7 +210,7 @@ function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCS
     return all_smoothed_states
 end
 
-function bboptimize2(f, x0, params; quiet=false, pool_size=20)
+function bboptimize2(f, x0, params; quiet=false, pool_size=20, best_callback=nothing)
     start = Dates.now()
     latest = start
 
@@ -294,6 +294,12 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=20)
             best_f = candidate_f
             best_x = copy(candidate)
             last_progress = i
+            if !isnothing(best_callback)
+                try
+                    best_callback(best_f, best_x)
+                catch
+                end
+            end
             if !quiet
                 println("** $i, $(Dates.now() - start), $best_f, $best_x")
             end
