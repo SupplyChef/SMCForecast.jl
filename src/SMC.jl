@@ -210,7 +210,7 @@ function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCS
     return all_smoothed_states
 end
 
-function bboptimize2(f, x0, params; quiet=false, pool_size=20, best_callback=nothing)
+function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=nothing)
     start = Dates.now()
     latest = start
 
