@@ -38,8 +38,8 @@ function single_order(current_inventory, order_period, lead_time, cover_until_pe
                 :SearchRange => [(0.0, 10_000.0)], 
                 :NumDimensions => 1, 
                 :MaxStepsWithoutProgress => 15000,
-                :MaxTime => 30))
+                :MaxTime => 10))
 
-    return order[1]
+    return Int(floor(order[1]))
 end
 
