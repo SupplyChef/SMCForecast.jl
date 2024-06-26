@@ -24,7 +24,7 @@ function evaluate_order(order, current_inventory, order_period, lead_time, cover
     return lost_sales_during_coverage, sales_during_coverage
 end
 
-function single_order(current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights)
+function single_order(current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights; maxtime=10)
     loss_function = x -> begin
         
         lost_sales_during_coverage, sales_during_coverage = evaluate_order(x[1], current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights)
@@ -38,7 +38,7 @@ function single_order(current_inventory, order_period, lead_time, cover_until_pe
                 :SearchRange => [(0.0, 10_000.0)], 
                 :NumDimensions => 1, 
                 :MaxStepsWithoutProgress => 15000,
-                :MaxTime => 10))
+                :MaxTime => maxtime))
 
     return Int(floor(order[1]))
 end
