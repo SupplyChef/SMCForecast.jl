@@ -1,18 +1,29 @@
-function evaluate_order(order, current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights)
-    lost_sales_during_coverage = 0
-    sales_during_coverage = 0
-    inventory = repeat([current_inventory], length(weights))
+function evaluate_order(order::Float64, current_inventory::Int64, order_period::Int64, lead_time::Int64, cover_until_period::Int64, service_level::Float64, future_observations::Vector{Vector{Int64}}, weights::Vector{Float64})
+    lost_sales_during_coverage::Float64 = 0.0
+    sales_during_coverage::Float64 = 0.0
+    inventory::Vector{Float64} = repeat([current_inventory] * 1.0, length(weights))
+
+    tmp::Vector{Float64} = zeros(Float64, length(weights))
+    rounded_order::Int64 = Int(floor(order))
     for i in 1:length(future_observations)
         if i == order_period
-            inventory .= inventory .+ Int(floor(order))
+            inventory .+= rounded_order 
         end
         if i <= order_period + lead_time
             inventory .= inventory .- future_observations[i]
             inventory .= max.(inventory, 0)
         end
         if i >= order_period + lead_time
-            lost_sales_during_coverage += sum(weights .* max.(future_observations[i] .- inventory, 0))
-            sales_during_coverage += sum(weights .* future_observations[i])
+            tmp .= future_observations[i]
+            tmp .= tmp .- inventory
+            tmp .= max.(tmp, 0)
+            tmp .= weights .* tmp
+            lost_sales_during_coverage += sum(tmp)
+            
+            tmp .= future_observations[i]
+            tmp .= weights .* tmp
+            sales_during_coverage += sum(tmp)
+            
             inventory .= inventory .- future_observations[i]
             inventory .= max.(inventory, 0)
         end
@@ -24,7 +35,7 @@ function evaluate_order(order, current_inventory, order_period, lead_time, cover
     return lost_sales_during_coverage, sales_during_coverage
 end
 
-function single_order(current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights; maxtime=10)
+function single_order(current_inventory::Int64, order_period::Int64, lead_time::Int64, cover_until_period::Int64, service_level::Float64, future_observations, weights; maxtime=10)
     loss_function = x -> begin
         
         lost_sales_during_coverage, sales_during_coverage = evaluate_order(x[1], current_inventory, order_period, lead_time, cover_until_period, service_level, future_observations, weights)
