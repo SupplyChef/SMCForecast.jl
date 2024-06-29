@@ -35,7 +35,7 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                                     min_observation_variance=0.00001,
                                     best_callback=nothing)
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
-                    [values[1], 0.00001, var(values) / (length(values) * 10), 0.95, 0.001, 0.1],
+                    [values[1], 0.00001, max((var(values) - (length(values) * mean(values))) / length(values),  0.00001), 0.95, 0.001, 0.1],
                     Dict(
                     :SearchRange => [(0, maximum(values)), (0.00001, mean(values) / 2), 
                                      (0.00001, var(values)), (min_observation_variance, 0.99999), 

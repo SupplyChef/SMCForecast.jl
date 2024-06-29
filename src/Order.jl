@@ -1,4 +1,4 @@
-function evaluate_order(order::Float64, current_inventory::Int64, order_period::Int64, lead_time::Int64, cover_until_period::Int64, service_level::Float64, future_observations, weights::Vector{Float64})
+function evaluate_order(order::Real, current_inventory::Int64, order_period::Int64, lead_time::Int64, cover_until_period::Int64, service_level::Float64, future_observations, weights::Vector{Float64})
     lost_sales_during_coverage::Float64 = 0.0
     sales_during_coverage::Float64 = 0.0
     inventory::Vector{Float64} = repeat([current_inventory] * 1.0, length(weights))

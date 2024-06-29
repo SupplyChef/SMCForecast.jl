@@ -225,7 +225,8 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     
     last_progress = 0
     
-    candidate_pool = vcat([x0], [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size-1])
+    candidate_pool = vcat([x0], 
+                          [[rand() .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 1:pool_size-1])
     #candidate_pool = [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size]
     #println(candidate_pool)
     pool_f = [f(candidate) for candidate in candidate_pool]
