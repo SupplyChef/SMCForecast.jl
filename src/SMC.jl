@@ -45,9 +45,9 @@ end
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; record=true) where {T <: SizedVector, U <: SMCSystem{T}} 
+function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
     observations = convert(Array{Union{Float64, Missing}, 1}, observations)
-    return filter!(smc, observations; record=record)
+    return filter!(smc, observations; record=record, trace=trace)
 end
 
 """
@@ -55,7 +55,11 @@ end
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; record=true) where {T <: SizedVector, U <: SMCSystem{T}} 
+function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
+    if record
+        #println(smc)
+    end
+
     historical_states = Array{T, 1}[]
     historical_weights = Array{Float64, 1}[]
     historical_proposed_states = Array{T, 1}[]
@@ -72,6 +76,7 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
     
     new_states = T[T(zeros(size(T, 1))) for i in 1:length(smc.states)]
     sampling_probabilities = [1.0 for i in 1:length(smc.states)]
+    observation_probabilities = [1.0 for i in 1:length(smc.states)]
     for (j, observation) in enumerate(observations)
         weight_sum::Float64 = 0.0
 
@@ -88,10 +93,14 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
         for i in eachindex(smc.states)
             new_state_observation_probability = 1.0
             if !ismissing(observation)
-                @inbounds new_state_observation_probability = observation_probability(smc.system, new_states[i], observation)
+                observation_probabilities[i] = observation_probability(smc.system, new_states[i], observation)
+                @inbounds new_state_observation_probability = observation_probabilities[i]
+                if record
+                    #println("$j $i $(new_states[i]) $observation $(observation_probabilities[i])")
+                end
             end
             
-            observation_weight::Float64 = sampling_probabilities[i] * new_state_observation_probability
+            observation_weight::Float64 = new_state_observation_probability
 
             if isinf(sampling_probabilities[i])
                 #println("Warning: Inf")
@@ -102,7 +111,7 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
                 observation_weight = 0
             end
 
-            weight::Float64 = smc.weights[i] * observation_weight
+            weight::Float64 = smc.weights[i] * sampling_probabilities[i] * observation_weight
             
             @inbounds copyto!(smc.states[i], new_states[i])
             #println("$(Base.objectid(smc.states[i])) $(Base.objectid(new_state))")
@@ -126,7 +135,27 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
         #    push!(historical_proposed_weights, deepcopy(smc.weights))
         #end
 
-        multinomial_resample!(smc)
+        f1 = filter(k -> new_states[k][3] == 1, collect(1:length(smc.states)))
+        count1 = length(f1)
+        weights1 = sum(smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
+        state1 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
+        obs1 = sum(observation_probabilities[f] for f in f1; init=0.0)
+        samp1 = sum(sampling_probabilities[f] for f in f1; init=0.0)
+
+        f2 = filter(k -> new_states[k][3] == 2, collect(1:length(smc.states)))
+        count2 = length(f2)
+        weights2 = sum(smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
+        state2 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
+        obs2 = sum(observation_probabilities[f] for f in f2; init=0.0)
+        samp2 = sum(sampling_probabilities[f] for f in f2; init=0.0)
+
+        resampled = multinomial_resample!(smc)
+
+        if !isnothing(trace)
+            #println([observation_probabilities[f] for f in f1])
+            #println([observation_probabilities[f] for f in f2])
+            push!(trace, (obs=observation, count1=count1, weights1=weights1, state1=state1, obs_prob1=obs1, samp_prob1=samp1, count2=count2, weights2=weights2, state2=state2, obs_prob2=obs2, samp_prob2=samp2, resampled=resampled))
+        end
 
         push!(filtered_states, average_state(smc.system, smc.states, smc.weights ./ length(smc.weights)))
 
@@ -182,6 +211,10 @@ function multinomial_resample!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMC
         end
         #smc.weights .= 1 / length(states)
         smc.weights .= 1
+
+        return true
+    else
+        return false
     end
 end
 
@@ -251,21 +284,21 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
             if r < 0.01
                 candidate[j] = params[:SearchRange][j][1]
             elseif r < 0.02
-                candidate[j] = candidate_pool[i1][j] + 0.1 * (randn())
+                candidate[j] = candidate_pool[i1][j] + 0.01 * (randn())
             elseif r < 0.08
-                candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn())
+                candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn())^2
                 #candidate[k] = candidate_pool[i1][j] + 1 * (randn())
             elseif r < 0.12
-                candidate[j] = candidate_pool[i2][j] + 0.1 * (randn())
+                candidate[j] = candidate_pool[i2][j] + 0.01 * (randn())
             elseif r < t + 0.12
-                candidate[j] = candidate_pool[i1][j] + (rand() + 0.2)^2 * (best_x[j] - candidate_pool[i3][j])
+                candidate[j] = candidate_pool[i1][j] + (rand())^2 * (best_x[j] - candidate_pool[i3][j])
             end
 
             if candidate[j] < params[:SearchRange][j][1]
-                candidate[j] = params[:SearchRange][j][1] + rand()^3 * (params[:SearchRange][j][2] - params[:SearchRange][j][1])
+                candidate[j] = min(params[:SearchRange][j][1] + 0.01 * rand()^3, params[:SearchRange][j][2]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
             end
             if candidate[j] > params[:SearchRange][j][2]
-                candidate[j] = params[:SearchRange][j][2] - rand()^3 * (params[:SearchRange][j][2] - params[:SearchRange][j][1])
+                candidate[j] = max(params[:SearchRange][j][2] - 0.01 * rand()^3, params[:SearchRange][j][1]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
             end
         end
         candidate_f = 0

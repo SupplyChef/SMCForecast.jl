@@ -11,11 +11,13 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     level_variance::Float64
     observation_variance::Float64
 
-    function LocalLevelJump(level1, level2, level_matrix, level_variance, observation_variance)
+    adjust_sampling::Bool
+
+    function LocalLevelJump(level1, level2, level_matrix, level_variance, observation_variance; adjust_sampling=true)
         levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
-        new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance)
+        new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance, adjust_sampling)
     end
 end
 
@@ -32,10 +34,10 @@ function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500
 end
 
 function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=100, 
-                                    min_observation_variance=0.00001,
+                                    min_observation_variance=0.00001, adjust_sampling=true,
                                     best_callback=nothing)
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
-                    [values[1], 0.00001, max((var(values) - (length(values) * mean(values))) / length(values),  0.00001), 0.95, 0.001, 0.1],
+                    [values[1], 0.00001, max((var(values) - (length(values) * mean(values))) / length(values),  0.00001), 0.95, 0.001, 0.9],
                     Dict(
                     :SearchRange => [(0, maximum(values)), (0.00001, mean(values) / 2), 
                                      (0.00001, var(values)), (min_observation_variance, 0.99999), 
@@ -51,18 +53,18 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                           [1-xs[5] xs[5]; 
                            1-xs[6] xs[6]],
                           abs(xs[3]),
-                          abs(xs[4]))
+                          abs(xs[4]); adjust_sampling=adjust_sampling)
     return fcs2
 end
 
-function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, size=1000)
+function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, size=1000, adjust_sampling=false)
     return xs -> begin
         fcs2 = LocalLevelJump(xs[1], 
                             xs[2],
                             [1-xs[5] xs[5]; 
                             1-xs[6] xs[6]],
                             abs(xs[3]),
-                            abs(xs[4]))
+                            abs(xs[4]); adjust_sampling=adjust_sampling)
         smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs2, size)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood + regularization * sum(x^2 for x in xs)
@@ -83,6 +85,8 @@ function sample_states(system::LocalLevelJump,
         value = current_state[2]
         state = Int(current_state[3])
         
+        sampling_probabilities[i] = 1
+
         n = Normal(0, sqrt(system.level_variance))
 
         new_state = sample(rng, system.levels, system.level_weights[state])
@@ -90,6 +94,12 @@ function sample_states(system::LocalLevelJump,
             while new_state == 2
                 new_state = sample(rng, system.levels, system.level_weights[state])
             end        
+        else
+            if next_observation == 0 && system.adjust_sampling
+                new_state = sample(rng, system.levels, pweights([0.5, 0.5]))
+                sampling_probabilities[i] = system.level_matrix[state, new_state] / 0.5
+                #println("$state $new_state $(sampling_probabilities[i])")
+            end
         end
         ϵ = rand(rng, n)
         new_value = max(value + ϵ, system.level2)
@@ -97,8 +107,6 @@ function sample_states(system::LocalLevelJump,
         new_states[i][1] = time + 1
         new_states[i][2] = new_value
         new_states[i][3] = new_state
-
-        sampling_probabilities[i] = 1
     end
 end
 
