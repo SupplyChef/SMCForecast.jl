@@ -135,26 +135,26 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
         #    push!(historical_proposed_weights, deepcopy(smc.weights))
         #end
 
-        f1 = filter(k -> new_states[k][3] == 1, collect(1:length(smc.states)))
-        count1 = length(f1)
-        weights1 = sum(smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
-        state1 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
-        obs1 = sum(observation_probabilities[f] for f in f1; init=0.0)
-        samp1 = sum(sampling_probabilities[f] for f in f1; init=0.0)
+        # f1 = filter(k -> new_states[k][3] == 1, collect(1:length(smc.states)))
+        # count1 = length(f1)
+        # weights1 = sum(smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
+        # state1 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
+        # obs1 = sum(observation_probabilities[f] for f in f1; init=0.0)
+        # samp1 = sum(sampling_probabilities[f] for f in f1; init=0.0)
 
-        f2 = filter(k -> new_states[k][3] == 2, collect(1:length(smc.states)))
-        count2 = length(f2)
-        weights2 = sum(smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
-        state2 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
-        obs2 = sum(observation_probabilities[f] for f in f2; init=0.0)
-        samp2 = sum(sampling_probabilities[f] for f in f2; init=0.0)
+        # f2 = filter(k -> new_states[k][3] == 2, collect(1:length(smc.states)))
+        # count2 = length(f2)
+        # weights2 = sum(smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
+        # state2 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
+        # obs2 = sum(observation_probabilities[f] for f in f2; init=0.0)
+        # samp2 = sum(sampling_probabilities[f] for f in f2; init=0.0)
 
         resampled = multinomial_resample!(smc)
 
         if !isnothing(trace)
             #println([observation_probabilities[f] for f in f1])
             #println([observation_probabilities[f] for f in f2])
-            push!(trace, (obs=observation, count1=count1, weights1=weights1, state1=state1, obs_prob1=obs1, samp_prob1=samp1, count2=count2, weights2=weights2, state2=state2, obs_prob2=obs2, samp_prob2=samp2, resampled=resampled))
+            #push!(trace, (obs=observation, count1=count1, weights1=weights1, state1=state1, obs_prob1=obs1, samp_prob1=samp1, count2=count2, weights2=weights2, state2=state2, obs_prob2=obs2, samp_prob2=samp2, resampled=resampled))
         end
 
         push!(filtered_states, average_state(smc.system, smc.states, smc.weights ./ length(smc.weights)))
@@ -259,7 +259,9 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     last_progress = 0
     
     candidate_pool = vcat([x0], 
-                          [[rand() .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 1:pool_size-1])
+                          [[rand() .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 2:6],
+                          [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 7:pool_size]
+                          )
     #candidate_pool = [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size]
     #println(candidate_pool)
     pool_f = [f(candidate) for candidate in candidate_pool]
