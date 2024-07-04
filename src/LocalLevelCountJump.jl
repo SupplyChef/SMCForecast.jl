@@ -10,6 +10,8 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
 
     level_variance::Float64
     observation_variance::Float64
+    log_observation_variance::Float64
+    log_one_observation_variance::Float64
 
     adjust_sampling::Bool
 
@@ -17,7 +19,7 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
         levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
-        new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance, adjust_sampling)
+        new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance, log(observation_variance), log(1 - observation_variance), adjust_sampling)
     end
 end
 
@@ -90,7 +92,8 @@ function sample_states(system::LocalLevelJump,
 
         n = Normal(0, sqrt(system.level_variance))
 
-        new_state = sample(rng, system.levels, system.level_weights[state])
+        #new_state = sample(rng, system.levels, system.level_weights[state])
+        @inbounds new_state = (rand(rng) > system.level_matrix[state, 1]) + 1
         if happy_only
             while new_state == 2
                 new_state = sample(rng, system.levels, system.level_weights[state])
@@ -145,6 +148,10 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
     return probability
 end
 
+function nbinom_pmf(r, p, logp, logonep, current_observation::Int64)
+    return binomial(current_observation + r - 1, current_observation) * exp(logp*r + logonep*current_observation)
+end
+
 function observation_probability(system::LocalLevelJump, current_state::SizedVector{3}, current_observation)::Float64
     time = current_state[1]
     value = current_state[2]
@@ -156,8 +163,12 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
 
     value = max(value, 0.0001)
     p = system.observation_variance
+    logp = system.log_observation_variance
+    logonep = system.log_one_observation_variance
     #println("$value, $p, $current_observation, $(pdf(NegativeBinomial(value * p / ( 1 - p), p), current_observation))")
-    return pdf(NegativeBinomial(value * p / (1 - p), p), current_observation) 
+    
+    #return pdf(NegativeBinomial(value * p / (1 - p), p), current_observation) 
+    return nbinom_pmf(value * p / (1 - p), p, logp, logonep, Int(current_observation))
 end
 
 function average_state(system::LocalLevelJump, states, weights)
