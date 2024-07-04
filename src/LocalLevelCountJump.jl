@@ -42,12 +42,12 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
                     [values[1], 0.00001, max((var(values) - (length(values) * mean(values))) / length(values),  0.00001), 0.95, 0.001, max(min_stay_outofstock_probability, 0.9)],
                     Dict(
-                    :SearchRange => [(0, maximum(values)), (0.00001, mean(values) / 2), 
-                                     (0.00001, var(values)), (min_observation_variance, 0.99999), 
-                                     (0.0001, .9999), (min_stay_outofstock_probability, .9999)], 
-                    :NumDimensions => dim, 
-                    :MaxTime => maxtime,
-                    :MaxStepsWithoutProgress => 2000),
+                        :SearchRange => [(0, maximum(values)), (0.00001, mean(values) / 2), 
+                                        (0.00001, var(values)), (min_observation_variance, 0.99999), 
+                                        (0.0001, .9999), (min_stay_outofstock_probability, .9999)], 
+                        :NumDimensions => dim, 
+                        :MaxTime => maxtime,
+                        :MaxStepsWithoutProgress => 2000),
                     best_callback = best_callback,
                     rng=rng
                     )
@@ -70,8 +70,7 @@ function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, si
                             abs(xs[3]),
                             abs(xs[4]); adjust_sampling=adjust_sampling)
         smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs2, size)
-        rng = Random.default_rng()
-        Random.seed!(rng, 1)
+        rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
