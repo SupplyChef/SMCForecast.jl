@@ -75,7 +75,7 @@ end
 
 function sample_states(system::LocalLevelRegressor, 
                        current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
-                       new_states, sampling_probabilities)
+                       new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
     values = [current_state[2] for current_state in current_states]
     changes = [current_state[3] for current_state in current_states]
@@ -84,7 +84,7 @@ function sample_states(system::LocalLevelRegressor,
     #println(new_change)
     
     n = Normal(0, sqrt(system.level_variance))
-    ϵs = rand(n, length(new_states))
+    ϵs = rand(rng, n, length(new_states))
     ps = pdf(n, ϵs)
 
     for i in 1:length(new_states)
@@ -95,10 +95,10 @@ function sample_states(system::LocalLevelRegressor,
     sampling_probabilities .= 1
 end
 
-function sample_observation(system::LocalLevelRegressor, current_state::SizedVector{3})
+function sample_observation(system::LocalLevelRegressor, current_state::SizedVector{3}; rng=Random.default_rng())
     value::Float64 = current_state[2]
     n = Normal(value, sqrt(system.observation_variance))
-    return rand(n)
+    return rand(rng, n)
 end
 
 function transition_probability(system::LocalLevelRegressor, state::SizedVector{3, Float64}, new_state::SizedVector{3, Float64})::Float64

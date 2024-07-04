@@ -61,12 +61,12 @@ end
 
 function sample_states(system::LocalLevel, 
                        current_states::Vector{SizedVector{2, Float64}}, next_observation::Union{Missing, Float64}, 
-                      new_states, sampling_probabilities)
+                      new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
     levels = [current_state[2] for current_state in current_states]
     
     n = Normal(0, sqrt(system.level_variance))
-    level_ϵs = rand(n, length(new_states))
+    level_ϵs = rand(rng, n, length(new_states))
 
     for i in 1:length(new_states)
         new_states[i][1] = time + 1
@@ -75,10 +75,10 @@ function sample_states(system::LocalLevel,
     sampling_probabilities .= 1
 end
 
-function sample_observation(system::LocalLevel, current_state::SizedVector{2})
+function sample_observation(system::LocalLevel, current_state::SizedVector{2}; rng=Random.default_rng())
     level::Float64 = current_state[2]
     n = Normal(level, sqrt(system.observation_variance))
-    return rand(n)
+    return rand(rng, n)
 end
 
 function transition_probability(system::LocalLevel, 

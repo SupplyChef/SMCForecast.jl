@@ -68,7 +68,7 @@ end
 
 function sample_states(system::ETS, 
                       current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
-                      new_states::Vector{SizedVector{3, Float64}}, sampling_probabilities::Array{Float64, 1})
+                      new_states::Vector{SizedVector{3, Float64}}, sampling_probabilities::Array{Float64, 1}; rng=Random.default_rng())
     time::Int64 = Int(current_states[1][1])
     
     finish::Int64 = length(new_states)
@@ -84,7 +84,7 @@ function sample_states(system::ETS,
     end
 
     change_n = Normal(0, sqrt(system.change_sensitivity))
-    change_ϵs::Array{Float64, 1} = rand(change_n, finish)
+    change_ϵs::Array{Float64, 1} = rand(rng, change_n, finish)
 
     @inbounds for i in 1:finish
         level::Float64 = current_states[i][2]
@@ -115,10 +115,10 @@ function sample_states(system::ETS,
     end
 end
 
-function sample_observation(system::ETS, current_state::SizedVector{3})
+function sample_observation(system::ETS, current_state::SizedVector{3}; rng=Random.default_rng())
     value::Float64 = current_state[2]
     n = Normal(value, sqrt(system.observation_sensitivity))
-    return rand(n)
+    return rand(rng, n)
 end
 
 function transition_probability(system::ETS, 

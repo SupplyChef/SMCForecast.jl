@@ -93,7 +93,7 @@ end
 
 function sample_states(system::LocalLevelCountJumpExplanatory, 
                       current_states::Vector{SizedVector{3, Float64}}, next_observation::Union{Missing, Float64}, 
-                      new_states, sampling_probabilities)
+                      new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
 
     for (i, current_state) in enumerate(current_states)
@@ -103,7 +103,7 @@ function sample_states(system::LocalLevelCountJumpExplanatory,
         n = Normal(0, sqrt(system.level_variance))
 
         new_state = sample(system.levels, system.level_weights[state])
-        ϵ = rand(n)
+        ϵ = rand(rng, n)
         new_value = value + ϵ
 
         p = pdf(n, ϵ)
@@ -116,7 +116,7 @@ function sample_states(system::LocalLevelCountJumpExplanatory,
     end
 end
 
-function sample_observation(system::LocalLevelCountJumpExplanatory, current_state::SizedVector{3})
+function sample_observation(system::LocalLevelCountJumpExplanatory, current_state::SizedVector{3}; rng=Random.default_rng())
     time = Int(current_state[1])
     value = current_state[2]
     state = Int(current_state[3])
@@ -125,7 +125,7 @@ function sample_observation(system::LocalLevelCountJumpExplanatory, current_stat
         value = system.level2
     end
 
-    return rand(Normal(value, sqrt(system.observation_variance)))
+    return rand(rng, Normal(value, sqrt(system.observation_variance)))
 end
 
 function transition_probability(system::LocalLevelCountJumpExplanatory, state1::SizedVector{3, Float64}, observation, state2::SizedVector{3, Float64})::Float64

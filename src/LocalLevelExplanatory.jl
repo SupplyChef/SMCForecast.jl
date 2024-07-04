@@ -89,12 +89,12 @@ end
 function sample_states(system::LocalLevelExplanatory, 
                        current_states::Vector{SizedVector{2, Float64}}, 
                        next_observation::Union{Missing, Float64}, 
-                       new_states, sampling_probabilities)
+                       new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
     values = [de_exogenous(current_state, system.exogenous, system.intercept, system.coefficients) for current_state in current_states]
 
     d = Normal(0, sqrt(system.transition_variance))
-    ϵs = rand(d, length(new_states))
+    ϵs = rand(rng, d, length(new_states))
     
     for i in 1:length(new_states)
         new_states[i][1] = time + 1
@@ -112,11 +112,11 @@ function transition_probability(system::LocalLevelExplanatory, state::SizedVecto
                                  de_exogenous(new_state, system.exogenous, system.intercept, system.coefficients))
 end
 
-function sample_observation(system::LocalLevelExplanatory, current_state::SizedVector{2})
+function sample_observation(system::LocalLevelExplanatory, current_state::SizedVector{2}; rng=Random.default_rng())
     time = Int(current_state[1])
     value = current_state[2]
     
-    return rand(Normal(value, sqrt(system.observation_variance)))
+    return rand(rng, Normal(value, sqrt(system.observation_variance)))
 end
 
 function observation_probability(system::LocalLevelExplanatory, state::SizedVector{2}, observation)::Float64

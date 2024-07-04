@@ -9,20 +9,13 @@ mutable struct SMC{T <: SizedVector, U <: SMCSystem{T}}
     states::Array{T, 1}
     weights::Array{Float64, 1}
 
-    observation_likelihood
-
     historical_states::Array{Array{T, 1}, 1}
     historical_weights::Array{Array{Float64, 1}, 1}
-
-    historical_proposed_states::Array{Array{T, 1}, 1}
-    historical_proposed_weights::Array{Array{Float64, 1}, 1}
 
     function SMC{T, U}(system::U, count::Int64) where U <: SMCSystem{T} where T <: SizedVector
         smc = new{T, U}(system, 
                         T[T(zeros(size(T, 1))) for i in 1:count], 
-                        zeros(Float64, count), 
-                        Array{T, 1}[], 
-                        Array{Float64, 1}[], 
+                        zeros(Float64, count),
                         Array{T, 1}[], 
                         Array{Float64, 1}[])
         return smc
@@ -45,9 +38,9 @@ end
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
+function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
     observations = convert(Array{Union{Float64, Missing}, 1}, observations)
-    return filter!(smc, observations; record=record, trace=trace)
+    return filter!(smc, observations; rng=rng, record=record, trace=trace)
 end
 
 """
@@ -55,24 +48,12 @@ end
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
-    if record
-        #println(smc)
-    end
-
+function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
     historical_states = Array{T, 1}[]
     historical_weights = Array{Float64, 1}[]
-    historical_proposed_states = Array{T, 1}[]
-    historical_proposed_weights = Array{Float64, 1}[]
-    
-    #initialize!(smc)
-    #if record
-    #    push!(historical_states, [copyto!(T(zeros(size(T, 1))), state) for state in smc.states])
-    #    push!(historical_weights, deepcopy(smc.weights))
-    #end
 
     filtered_states = []
-    smc.observation_likelihood = zeros(length(observations))
+    observation_likelihood = zeros(length(observations))
     
     new_states = T[T(zeros(size(T, 1))) for i in 1:length(smc.states)]
     sampling_probabilities = [1.0 for i in 1:length(smc.states)]
@@ -81,106 +62,56 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
         weight_sum::Float64 = 0.0
 
         if j == 1
-            new_states = sample_initial_state(smc.system, length(new_states))
+            new_states = sample_initial_state(smc.system, length(new_states); rng=rng)
             smc.weights .= 1.0
             sampling_probabilities .= 1.0
         else
-            sample_states(smc.system, smc.states, observation, new_states, sampling_probabilities)
-            #println("New states: $new_states")
-            #println("New states sampling probabilities: $sampling_probabilities")
+            sample_states(smc.system, smc.states, observation, new_states, sampling_probabilities; rng=rng)
         end
 
         for i in eachindex(smc.states)
-            new_state_observation_probability = 1.0
+            observation_probabilities[i] = 1.0
+            
             if !ismissing(observation)
                 observation_probabilities[i] = observation_probability(smc.system, new_states[i], observation)
-                @inbounds new_state_observation_probability = observation_probabilities[i]
-                if record
-                    #println("$j $i $(new_states[i]) $observation $(observation_probabilities[i])")
-                end
-            end
-            
-            observation_weight::Float64 = new_state_observation_probability
-
-            if isinf(sampling_probabilities[i])
-                #println("Warning: Inf")
-                observation_weight = new_state_observation_probability
-            end
-            if isnan(observation_weight) || isinf(observation_weight) || (observation_weight == 0)
-                #println("Problem with observation weight: $(smc.states[i]) -> $(new_states[i]); $(smc.weights[i]), $new_state_observation_probability, $observation")
-                observation_weight = 0
             end
 
-            weight::Float64 = smc.weights[i] * sampling_probabilities[i] * observation_weight
+            if isnan(observation_probabilities[i]) || isinf(observation_probabilities[i]) || (observation_probabilities[i] == 0)
+                observation_probabilities[i] = 0
+            end
+
+            weight::Float64 = smc.weights[i] * sampling_probabilities[i] * observation_probabilities[i]
             
             @inbounds copyto!(smc.states[i], new_states[i])
-            #println("$(Base.objectid(smc.states[i])) $(Base.objectid(new_state))")
             smc.weights[i] = weight
-            #println("$(smc.states[i]) $(smc.weights[i])")
 
             weight_sum = weight_sum + weight
-
-            #println("$j $i, $state $observation, $observation_weight")
         end
 
-        #println("step: $j, likelihood: $weight_sum")
-        smc.observation_likelihood[j] = weight_sum
-
-        #println("Weights: $(smc.weights)")
+        observation_likelihood[j] = weight_sum
 
         smc.weights .= smc.weights ./ weight_sum .* length(smc.weights)
 
-        #if record
-        #    push!(historical_proposed_states, [copyto!(T(zeros(size(T, 1))), state) for state in smc.states])
-        #    push!(historical_proposed_weights, deepcopy(smc.weights))
-        #end
-
-        # f1 = filter(k -> new_states[k][3] == 1, collect(1:length(smc.states)))
-        # count1 = length(f1)
-        # weights1 = sum(smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
-        # state1 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f1; init=0.0)
-        # obs1 = sum(observation_probabilities[f] for f in f1; init=0.0)
-        # samp1 = sum(sampling_probabilities[f] for f in f1; init=0.0)
-
-        # f2 = filter(k -> new_states[k][3] == 2, collect(1:length(smc.states)))
-        # count2 = length(f2)
-        # weights2 = sum(smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
-        # state2 = sum(smc.states[f][2] * smc.weights[f] / length(smc.weights) for f in f2; init=0.0)
-        # obs2 = sum(observation_probabilities[f] for f in f2; init=0.0)
-        # samp2 = sum(sampling_probabilities[f] for f in f2; init=0.0)
-
-        resampled = multinomial_resample!(smc)
-
-        if !isnothing(trace)
-            #println([observation_probabilities[f] for f in f1])
-            #println([observation_probabilities[f] for f in f2])
-            #push!(trace, (obs=observation, count1=count1, weights1=weights1, state1=state1, obs_prob1=obs1, samp_prob1=samp1, count2=count2, weights2=weights2, state2=state2, obs_prob2=obs2, samp_prob2=samp2, resampled=resampled))
-        end
+        resampled = multinomial_resample!(smc; rng=rng)
 
         push!(filtered_states, average_state(smc.system, smc.states, smc.weights ./ length(smc.weights)))
-
-        #println([(p.state, p.weight) for p in smc.particles])
-        #println(sum(p.state * p.weight for p in smc.particles))
     
         if record
             push!(historical_states, [copyto!(T(zeros(size(T, 1))), state) for state in smc.states])
             push!(historical_weights, deepcopy(smc.weights))
         end
     end
-    #println(sum(log.(likelihood ./ length(smc.states))))
 
     if record
         smc.historical_states = historical_states
         smc.historical_weights = historical_weights
-        smc.historical_proposed_states = historical_proposed_states
-        smc.historical_proposed_weights = historical_proposed_weights
     end
 
     #return filtered_states, sum(log.(smc.observation_likelihood ./ length(smc.states)))
-    return filtered_states, sum(log.(smc.observation_likelihood) .- 1 * log(length(smc.states)))
+    return filtered_states, sum(log.(observation_likelihood) .- 1 * log(length(smc.states)))
 end
 
-function multinomial_resample!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMCSystem{T}} 
+function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
     #effective_size = 1 / sum(weight^2 for weight in smc.weights)
     effective_size = length(smc.weights)^2 / sum(weight^2 for weight in smc.weights)
 
@@ -190,7 +121,7 @@ function multinomial_resample!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMC
         samples = Array{Int64}(undef, length(smc.states))
         sampled = zeros(Int64, length(smc.states))
         
-        StatsBase.sample!(1:length(states), pweights(smc.weights), samples)
+        StatsBase.sample!(rng, 1:length(states), pweights(smc.weights), samples)
         for sample in samples
             sampled[sample] = sampled[sample] + 1
         end
@@ -218,7 +149,7 @@ function multinomial_resample!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMC
     end
 end
 
-function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCSystem{T}} 
+function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
     if isnothing(smc.historical_states) || isnothing(smc.historical_weights)
         throw(ErrorException("The filter! method must be called first with record parameter set to true."))
     end
@@ -228,7 +159,7 @@ function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCS
     for c in 1:count
         smoothed_states = []
         
-        smoothed_state = StatsBase.sample(smc.historical_states[end], pweights(smc.historical_weights[end]))
+        smoothed_state = StatsBase.sample(rng, smc.historical_states[end], pweights(smc.historical_weights[end]))
         push!(smoothed_states, smoothed_state)
         for i in (length(smc.historical_states)-1):-1:1
             #TODO: pass in the observation instead of missing
@@ -243,7 +174,7 @@ function smooth(smc::SMC{T, U}, count::Int64) where {T <: SizedVector, U <: SMCS
     return all_smoothed_states
 end
 
-function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=nothing)
+function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=nothing, rng=Random.default_rng())
     start = Dates.now()
     latest = start
 
@@ -259,8 +190,8 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     last_progress = 0
     
     candidate_pool = vcat([x0], 
-                          [[rand() .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 2:6],
-                          [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 7:pool_size]
+                          [[rand(rng) .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 2:6],
+                          [[rand(rng) .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 7:pool_size]
                           )
     #candidate_pool = [[rand() .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 1:pool_size]
     #println(candidate_pool)
@@ -276,31 +207,31 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
             break
         end
 
-        i1 = rand(1:pool_size)
-        i2 = rand(1:pool_size)
-        i3 = rand(1:pool_size)
+        i1 = rand(rng, 1:pool_size)
+        i2 = rand(rng, 1:pool_size)
+        i3 = rand(rng, 1:pool_size)
 
         candidate = copy(candidate_pool[i1])
         @inbounds for j in eachindex(candidate)
-            r = rand()
+            r = rand(rng)
             if r < 0.01
                 candidate[j] = params[:SearchRange][j][1]
             elseif r < 0.02
-                candidate[j] = candidate_pool[i1][j] + 0.01 * (randn())
+                candidate[j] = candidate_pool[i1][j] + 0.01 * (randn(rng))
             elseif r < 0.08
-                candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn())^2
+                candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn(rng))^2
                 #candidate[k] = candidate_pool[i1][j] + 1 * (randn())
             elseif r < 0.12
-                candidate[j] = candidate_pool[i2][j] + 0.01 * (randn())
+                candidate[j] = candidate_pool[i2][j] + 0.01 * (randn(rng))
             elseif r < t + 0.12
-                candidate[j] = candidate_pool[i1][j] + (rand())^2 * (best_x[j] - candidate_pool[i3][j])
+                candidate[j] = candidate_pool[i1][j] + (rand(rng))^2 * (best_x[j] - candidate_pool[i3][j])
             end
 
             if candidate[j] < params[:SearchRange][j][1]
-                candidate[j] = min(params[:SearchRange][j][1] + 0.01 * rand()^3, params[:SearchRange][j][2]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
+                candidate[j] = min(params[:SearchRange][j][1] + 0.01 * rand(rng)^3, params[:SearchRange][j][2]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
             end
             if candidate[j] > params[:SearchRange][j][2]
-                candidate[j] = max(params[:SearchRange][j][2] - 0.01 * rand()^3, params[:SearchRange][j][1]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
+                candidate[j] = max(params[:SearchRange][j][2] - 0.01 * rand(rng)^3, params[:SearchRange][j][1]) #* (params[:SearchRange][j][2] - params[:SearchRange][j][1])
             end
         end
         candidate_f = 0

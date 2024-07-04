@@ -9,19 +9,19 @@ end
 function sample_states(system::System{SizedVector{1}}, 
                        current_states::Vector{SizedVector{1}}, 
                        next_observation::Union{Missing, Float64}, 
-                       new_states, sampling_probabilities)
+                       new_states, sampling_probabilities; rng=Random.default_rng())
 
     for (i, current_state) in enumerate(current_states)
         d = system.transition_distribution(current_state[1])
-        x = rand(d)
+        x = rand(rng, d)
 
         new_states[i][1] = x
         sampling_probabilities[i] = 1
     end
 end
 
-function sample_observation(system::System{SizedVector{1}}, current_state::SizedVector{1})
-    return rand(system.observation_distribution(current_state[1]))
+function sample_observation(system::System{SizedVector{1}}, current_state::SizedVector{1}; rng=Random.default_rng())
+    return rand(rng, system.observation_distribution(current_state[1]))
 end
 
 function transition_probability(system, state, observation, new_state)
