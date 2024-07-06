@@ -156,6 +156,7 @@ function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T
 
     all_smoothed_states = []
     weights = zeros(Float64, length(smc.historical_weights[1]))
+    transition_probabilities = zeros(Float64, length(smc.historical_weights[1]))
     for c in 1:count
         smoothed_states = []
         
@@ -163,7 +164,10 @@ function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T
         push!(smoothed_states, smoothed_state)
         for i in (length(smc.historical_states)-1):-1:1
             #TODO: pass in the observation instead of missing
-            weights .= smc.historical_weights[i] .* [transition_probability(smc.system, state, missing, smoothed_state) for state in smc.historical_states[i]]
+            for j in 1:length(smc.historical_states[i])
+                transition_probabilities[j] = transition_probability(smc.system, smc.historical_states[i][j], missing, smoothed_state)
+            end
+            weights .= smc.historical_weights[i] .* transition_probabilities
             smoothed_state = StatsBase.sample(smc.historical_states[i], pweights(weights))
             push!(smoothed_states, smoothed_state)
         end
