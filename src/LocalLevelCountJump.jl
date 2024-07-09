@@ -73,7 +73,7 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                                         (0.00001, mean(values) / 2), 
                                         (0.00001, var(values)),
                                         (0, 1),
-                                        (0, 10), 
+                                        (0, 1), 
                                         (0.0001, .9999), 
                                         (min_stay_outofstock_probability, .9999)], 
                         :NumDimensions => 7, 
