@@ -5,11 +5,17 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     
     level_matrix::Array{Float64, 2}
     levels::Array{Int64, 1}
-    level_weights::Array{ProbabilityWeights, 1}
-    level_weights10::ProbabilityWeights
-
+    
     level_variance::Float64
     observation_variance::Float64
+
+    # the members below are used to speed up computation
+    level2_exp::Float64
+
+    level_weights::Array{ProbabilityWeights, 1}
+    level_weights10::ProbabilityWeights
+    level_equal_weights::ProbabilityWeights
+
     log_observation_variance::Float64
     log_one_observation_variance::Float64
 
@@ -19,7 +25,9 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
         levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
-        new(level1, level2, level_matrix, levels, level_weights, level_weights10, level_variance, observation_variance, log(observation_variance), log(1 - observation_variance), adjust_sampling)
+        level_equal_weights = pweights([0.5, 0.5])
+        new(level1, level2, level_matrix, levels, level_variance, observation_variance, 
+            exp(-level2), level_weights, level_weights10, level_equal_weights, log(observation_variance), log(1 - observation_variance), adjust_sampling)
     end
 end
 
@@ -82,7 +90,8 @@ function sample_initial_state(system::LocalLevelJump, count; rng=Random.default_
 end
 
 function sample_states(system::LocalLevelJump, 
-                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
+                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, 
+                       next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
     time = Int(current_states[1][1])
 
@@ -102,9 +111,8 @@ function sample_states(system::LocalLevelJump,
             end        
         else
             if next_observation == 0 && system.adjust_sampling
-                new_state = sample(rng, system.levels, pweights([0.5, 0.5]))
+                new_state = sample(rng, system.levels, system.level_equal_weights)
                 sampling_probabilities[i] = system.level_matrix[state, new_state] / 0.5
-                #println("$state $new_state $(sampling_probabilities[i])")
             end
         end
         ϵ = rand(rng, n)
@@ -124,13 +132,13 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
         return rand(rng, Poisson(system.level2))
     end
 
-    value = max(value, 0.0001)
+    #value = max(value, 0.0001)
     p = system.observation_variance
     return rand(rng, NegativeBinomial(value * p / (1 - p), p))
 end
 
 function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, new_observation, state2::SizedVector{3})::Float64
-    time = state1[1]
+    #time = state1[1]
     value = state1[2]
     state = Int(state1[3])
 
@@ -144,22 +152,34 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
         p = cdf(n, new_value - value)
     end
     probability = system.level_matrix[state, new_state] * p
-    if isinf(probability) || isnan(probability)
-        #println("$probability, $state1, $state2")
-    end
+
     return probability
 end
 
-function nbinom_pmf(r, p, logp, logonep, current_observation::Int64)
-    return binomial(current_observation + r - 1, current_observation) * exp(logp*r + logonep*current_observation)
+function negative_binomial_pmf(r, p, logp, logonep, current_observation::Int64)
+    return binomial_coefficient(current_observation + r - 1, current_observation) * exp(logp*r + logonep*current_observation)
+end
+
+function binomial_coefficient(n::Float64, k::Int64)::Float64
+    if k == 0
+        return 1.0
+    end
+    binomial_coefficient = n
+    @inbounds for i in 2:k
+        binomial_coefficient *= (n + 1 - i) / i
+    end
+    return binomial_coefficient
 end
 
 function observation_probability(system::LocalLevelJump, current_state::SizedVector{3}, current_observation)::Float64
     time = current_state[1]
     value = current_state[2]
-    state = Int(current_state[3])
+    state = current_state[3]
 
     if state == 2
+        if current_observation == 0
+            return system.level2_exp
+        end
         return pdf(Poisson(system.level2), current_observation)
     end
 
@@ -170,7 +190,7 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
     #println("$value, $p, $current_observation, $(pdf(NegativeBinomial(value * p / ( 1 - p), p), current_observation))")
     
     #return pdf(NegativeBinomial(value * p / (1 - p), p), current_observation) 
-    return nbinom_pmf(value * p / (1 - p), p, logp, logonep, Int(current_observation))
+    return negative_binomial_pmf(value * p / (1 - p), p, logp, logonep, Int(current_observation))
 end
 
 function average_state(system::LocalLevelJump, states, weights)
