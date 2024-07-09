@@ -8,6 +8,7 @@ using MLJ
 using Optim
 using StatsBase
 using StaticArrays
+using SpecialFunctions
 using Distributions
 import Distributions:rand
 
