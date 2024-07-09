@@ -57,7 +57,7 @@ function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500
 end
 
 function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=100, 
-                                    min_observation_variance=0.00001, min_stay_outofstock_probability=0.0001,
+                                    min_overdispersion=0.00001, min_stay_outofstock_probability=0.0001,
                                     adjust_sampling=true,
                                     best_callback=nothing, rng=Random.default_rng())
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
@@ -72,8 +72,8 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                         :SearchRange => [(0, maximum(values)), 
                                         (0.00001, mean(values) / 2), 
                                         (0.00001, var(values)),
-                                        (0, 1),
-                                        (0, 1), 
+                                        (0.00001, .9999),
+                                        (min_overdispersion, .9999), 
                                         (0.0001, .9999), 
                                         (min_stay_outofstock_probability, .9999)], 
                         :NumDimensions => 7, 
@@ -159,6 +159,7 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
         return rand(rng, Poisson(system.level2))
     end
 
+    value = value * (1 - system.overdispersion) / (1 - system.zero_inflation)
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
@@ -193,6 +194,7 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
         return pdf(Poisson(system.level2), current_observation)
     end
 
+    value = value * (1 - system.overdispersion) / (1 - system.zero_inflation)
     return zigp_pmf(Int(current_observation), value, system.overdispersion, system.zero_inflation)
 end
 
