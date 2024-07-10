@@ -4,17 +4,21 @@
     using JSON3
     using Random
     using StaticArrays
+    using XLSX
     using SMCForecast
 
     println(pwd())
-    sales = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\sales_train_evaluation.csv", DataFrame)
-    sales2 = stack(sales, 7:1947)
+    # sales = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\sales_train_evaluation.csv", DataFrame)
+    # sales2 = stack(sales, 7:1947)
 
-    calendar = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\calendar.csv", DataFrame)
-    sales3 = innerjoin(sales2, calendar, on=:variable=>:d)
+    # calendar = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\calendar.csv", DataFrame)
+    # sales3 = innerjoin(sales2, calendar, on=:variable=>:d)
 
-    prices = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\sell_prices.csv", DataFrame)
-    sales4 = innerjoin(sales3, prices, on=[:store_id, :item_id, :wm_yr_wk])
+    # prices = CSV.read(raw"C:\Users\renau\source\repos\SMCForecast\datasets\m5-forecasting-uncertainty\sell_prices.csv", DataFrame)
+    # sales4 = innerjoin(sales3, prices, on=[:store_id, :item_id, :wm_yr_wk])
+
+    xf =  XLSX.openxlsx(raw"../datasets/sample_data.xlsx") 
+    sales4 = DataFrame(XLSX.gettable(xf["data"]))
 
     gd = first(groupby(sales4, :id), 30)
     historical_values = Dict(k.id => select(gd[k], :date, :value) for k in keys(gd))
@@ -33,7 +37,7 @@
         forecast_percentiles=[0.025, 0.5, 0.975]
         fcs = SMCForecast.fit(Val{LocalLevelJump}(), v.value * 1.0; maxtime=130, size=300)
         println(fcs)
-        smc = SMC{SizedVector{3, Float64}, LocalLevelJump}(fcs, 10)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs, 10)
         filtered_states, likelihood = SMCForecast.filter!(smc, v.value * 1.0; record=false)
         obs, weights = SMCForecast.predict_observations(smc, nrow(t))
         println("obs: $obs")
