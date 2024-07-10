@@ -223,6 +223,12 @@ end
 function log_generalized_poisson_pmf(k::Int, lambda::Float64, theta::Float64)::Float64
     if k == 0
         return -lambda
+    elseif k == 1
+        log_lambda = log(lambda)
+        log_term3 = -(lambda + theta)
+
+        log_pmf = log_lambda + log_term3
+        return log_pmf 
     else
         log_lambda = log(lambda)
         log_term2 = (k - 1) * log(lambda + k * theta)
