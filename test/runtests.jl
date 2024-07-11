@@ -137,7 +137,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64}, LocalLevel}(system, 10)
+        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -155,7 +155,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64}, LocalLevel}(system, 10)
+        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -173,7 +173,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64}, LocalLevel}(system, 10)
+        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)
