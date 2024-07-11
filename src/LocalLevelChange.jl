@@ -30,9 +30,13 @@ end
 function fit(::Val{LocalLevelChange}, values; maxtime=10.0, size=100, regularization=0.0)
     dim = 5
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelChange}(), values; size=size, regularization=regularization),
-                    [values[1], values[2]-values[1], var(values), 0.01, var(values)],
+                    [values[1], values[2]-values[1], var(values) / length(values), 0.01, var(values) / length(values)],
                     Dict(
-                        :SearchRange => [(minimum(values), maximum(values)), (-10, +10), (0.0001, var(values)), (0.0001, var(values) / 1000), (0.0001, var(values))], 
+                        :SearchRange => [(minimum(values), maximum(values)), 
+                                         (-10, +10), 
+                                         (0.00001, var(values)), 
+                                         (0.00001, var(values) / 1000), 
+                                         (0.00001, var(values))], 
                         :NumDimensions => dim, 
                         :MaxStepsWithoutProgress => 15000,
                         :MaxTime => maxtime); quiet=false

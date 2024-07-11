@@ -1,7 +1,7 @@
 """
 Local level model
 """
-struct LocalLevel <: SMCSystem{SizedVector{2, Float64}}
+struct LocalLevel <: SMCSystem{SizedVector{2, Float64, Vector{Float64}}}
     level::Float64
     level_variance::Float64
     observation_variance::Float64
@@ -29,9 +29,11 @@ end
 function fit(::Val{LocalLevel}, values; maxtime=10.0, size=100)
     dim = 3
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevel}(), values; size=size),
-                    [values[1], var(values), var(values)],
+                    [values[1], var(values) / length(values), var(values) / length(values)],
                     Dict(
-                        :SearchRange => [(minimum(values), maximum(values)), (0.0001, var(values)), (0.0001, var(values))], 
+                        :SearchRange => [(minimum(values), maximum(values)), 
+                                         (0.00001, var(values)), 
+                                         (0.00001, var(values))], 
                         :NumDimensions => dim, 
                         :MaxStepsWithoutProgress => 5000,
                         :MaxTime => maxtime)
@@ -48,19 +50,19 @@ function get_loss_function(::Val{LocalLevel}, values; size=100)
         fcs2 = LocalLevel(xs[1], 
                           abs(xs[2]),
                           abs(xs[3]))
-        smc = SMC{SizedVector{2, Float64}, LocalLevel}(fcs2, size)
+        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(fcs2, size)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false)
         return -likelihood
     end
 end
 
 function sample_initial_state(system::LocalLevel, count; rng=Random.default_rng())
-    states = [SizedVector{2, Float64}(0, r) for r in rand(rng, system.prior_distribution(), count)]
+    states = [SizedVector{2, Float64, Vector{Float64}}(0, r) for r in rand(rng, system.prior_distribution(), count)]
     return states
 end
 
 function sample_states(system::LocalLevel, 
-                       current_states::Vector{SizedVector{2, Float64}}, next_observation::Union{Missing, Float64}, 
+                       current_states::Vector{SizedVector{2, Float64, Vector{Float64}}}, next_observation::Union{Missing, Float64}, 
                       new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
     levels = [current_state[2] for current_state in current_states]
@@ -82,7 +84,7 @@ function sample_observation(system::LocalLevel, current_state::SizedVector{2}; r
 end
 
 function transition_probability(system::LocalLevel, 
-                                state::SizedVector{2, Float64}, 
+                                state::SizedVector{2, Float64, Vector{Float64}}, 
                                 new_observation,
                                 new_state::SizedVector{2, Float64})::Float64
     time = state[1]
@@ -93,12 +95,16 @@ function transition_probability(system::LocalLevel,
                                  new_value)
 end
 
-function observation_probability(system::LocalLevel, state::SizedVector{2, Float64}, observation::Float64)::Float64
+function observation_probability(system::LocalLevel, state::SizedVector{2, Float64, Vector{Float64}}, observation::Float64)::Float64
     level::Float64 = state[2]
     t = Normal(level, sqrt(system.observation_variance))
     return pdf(t, observation)
 end
 
 function average_state(system::LocalLevel, states, weights)
-    return SizedVector{2, Float64}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights))])
+    average_level = 0.0
+    for i in eachindex(weights)
+        average_level += states[i][2] * weights[i]
+    end
+    return SizedVector{2, Float64, Vector{Float64}}([states[1][1], average_level])
 end
