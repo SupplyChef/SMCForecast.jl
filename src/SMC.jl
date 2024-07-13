@@ -193,7 +193,7 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     
     last_progress = 0
     
-    candidate_pool = vcat([x0], 
+    candidate_pool = vcat([copy(x0)], 
                           [[rand(rng) .* (min(params[:SearchRange][j][2], x0[j] * 2) - max(params[:SearchRange][j][1], x0[j] / 2)) .+ max(params[:SearchRange][j][1], x0[j] / 2) for j in 1:length(x0)] for i in 2:6],
                           [[rand(rng) .* (params[:SearchRange][j][2] - params[:SearchRange][j][1]) .+ params[:SearchRange][j][1] for j in 1:length(x0)] for i in 7:pool_size]
                           )
@@ -202,7 +202,7 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     pool_f = [f(candidate) for candidate in candidate_pool]
     #println(pool_f)
 
-    t = max(0.1, min(0.9, 6 / length(x0)))
+    t = max(0.1, min(0.9, 8 / length(x0)))
     #println(t)
 
     for i in 1:get(params, :MaxFuncEvals, typemax(Int64))
@@ -219,16 +219,16 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
         @inbounds for j in eachindex(candidate)
             r = rand(rng)
             if r < 0.01
-                candidate[j] = params[:SearchRange][j][1]
-            elseif r < 0.02
-                candidate[j] = candidate_pool[i1][j] + 0.01 * (randn(rng))
-            elseif r < 0.08
-                candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn(rng))^2
-                #candidate[k] = candidate_pool[i1][j] + 1 * (randn())
+                candidate[j] = x0[j] #params[:SearchRange][j][1]
             elseif r < 0.12
-                candidate[j] = candidate_pool[i2][j] + 0.01 * (randn(rng))
+                candidate[j] = candidate_pool[i3][j] + 0.01 * (randn(rng))
+            #elseif r < 0.08
+            #    candidate[j] = candidate_pool[i1][j] + (candidate_pool[i2][j]-candidate_pool[i3][j]) * (randn(rng))^2
+                #candidate[k] = candidate_pool[i1][j] + 1 * (randn())
+            #elseif r < 0.12
+            #    candidate[j] = candidate_pool[i2][j] + 0.01 * (randn(rng))
             elseif r < t + 0.12
-                candidate[j] = candidate_pool[i1][j] + (rand(rng))^2 * (best_x[j] - candidate_pool[i3][j])
+                candidate[j] = candidate_pool[i1][j] + (rand(rng))^4 * (best_x[j] - candidate_pool[i2][j])
             end
 
             if candidate[j] < params[:SearchRange][j][1]

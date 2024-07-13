@@ -751,9 +751,9 @@ version = "1.11.0"
 
 [[deps.MLJModels]]
 deps = ["CategoricalArrays", "CategoricalDistributions", "Combinatorics", "Dates", "Distances", "Distributions", "InteractiveUtils", "LinearAlgebra", "MLJModelInterface", "Markdown", "OrderedCollections", "Parameters", "Pkg", "PrettyPrinting", "REPL", "Random", "RelocatableFolders", "ScientificTypes", "StatisticalTraits", "Statistics", "StatsBase", "Tables"]
-git-tree-sha1 = "cd1bff9cbea4c00877d370005e45dd1ca19f3c18"
+git-tree-sha1 = "1ca3c428012b1b5a6623d3ebb86e1a56c53e6808"
 uuid = "d491faf4-2d78-11e9-2867-c94bc002c0b7"
-version = "0.17.2"
+version = "0.17.3"
 
 [[deps.MLJTuning]]
 deps = ["ComputationalResources", "Distributed", "Distributions", "LatinHypercubeSampling", "MLJBase", "ProgressMeter", "Random", "RecipesBase", "StatisticalMeasuresBase"]

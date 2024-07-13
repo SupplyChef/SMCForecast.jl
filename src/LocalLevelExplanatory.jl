@@ -64,7 +64,7 @@ if length(x) == 0 return 0.0 end
     return v
 end
 
-function de_exogenous(state::SizedVector, exogenous::Matrix{Float64}, intercept::Float64, coefficients::Vector{Float64})::Float64
+function de_exogenous_additive(state::SizedVector, exogenous::Matrix{Float64}, intercept::Float64, coefficients::Vector{Float64})::Float64
     time = Int(state[1])
     value = state[2]
     if time == 0
@@ -73,7 +73,7 @@ function de_exogenous(state::SizedVector, exogenous::Matrix{Float64}, intercept:
     return @inbounds @views value - prodsum(exogenous[:, time], coefficients) - intercept
 end
 
-function re_exogenous(value, time, exogenous, intercept, coefficients)::Float64
+function re_exogenous_additive(value, time, exogenous, intercept, coefficients)::Float64
     if time == 0
         return value + intercept
     end
@@ -91,14 +91,14 @@ function sample_states(system::LocalLevelExplanatory,
                        next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
-    values = [de_exogenous(current_state, system.exogenous, system.intercept, system.coefficients) for current_state in current_states]
+    values = [de_exogenous_additive(current_state, system.exogenous, system.intercept, system.coefficients) for current_state in current_states]
 
     d = Normal(0, sqrt(system.transition_variance))
     ϵs = rand(rng, d, length(new_states))
     
     for i in 1:length(new_states)
         new_states[i][1] = time + 1
-        new_states[i][2] = re_exogenous(values[i] + ϵs[i], time + 1, system.exogenous, system.intercept, system.coefficients)
+        new_states[i][2] = re_exogenous_additive(values[i] + ϵs[i], time + 1, system.exogenous, system.intercept, system.coefficients)
     end
     sampling_probabilities .= 1
 end
@@ -107,9 +107,9 @@ function transition_probability(system::LocalLevelExplanatory, state::SizedVecto
     time = state[1]
     value = state[2]
 
-    return Distributions.normpdf(de_exogenous(state, system.exogenous, system.intercept, system.coefficients), 
+    return Distributions.normpdf(de_exogenous_additive(state, system.exogenous, system.intercept, system.coefficients), 
                                  sqrt(system.transition_variance), 
-                                 de_exogenous(new_state, system.exogenous, system.intercept, system.coefficients))
+                                 de_exogenous_additive(new_state, system.exogenous, system.intercept, system.coefficients))
 end
 
 function sample_observation(system::LocalLevelExplanatory, current_state::SizedVector{2}; rng=Random.default_rng())

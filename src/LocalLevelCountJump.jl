@@ -60,18 +60,19 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                                     min_overdispersion=0.00001, min_stay_outofstock_probability=0.0001,
                                     adjust_sampling=true,
                                     best_callback=nothing, rng=Random.default_rng())
+    println("mean: $(mean(values)) var: $(var(values)) est: $((var(values) - (length(values) * mean(values))) / length(values))")                
     xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
-                    [values[1], 
+                    [mean(values), 
                      0.00001, 
-                     max((var(values) - (length(values) * mean(values))) / length(values),  0.00001), 
+                     max((var(values) - (length(values) * mean(values))) / length(values),  0.001), 
                      0.0, 
                      0.0, 
-                     0.001, 
+                     0.1, 
                      max(min_stay_outofstock_probability, 0.9)],
                     Dict(
                         :SearchRange => [(0, maximum(values)), 
                                         (0.00001, mean(values) / 2), 
-                                        (0.00001, var(values)),
+                                        (0.00001, var(values) / length(values)),
                                         (0.00001, .9999),
                                         (min_overdispersion, .9999), 
                                         (0.0001, .9999), 
@@ -137,7 +138,7 @@ function sample_states(system::LocalLevelJump,
                 new_state = sample(rng, system.levels, system.level_weights[state])
             end        
         else
-            if next_observation == 0 && system.adjust_sampling
+            if !ismissing(next_observation) && next_observation == 0 && system.adjust_sampling
                 new_state = sample(rng, system.levels, system.level_equal_weights)
                 sampling_probabilities[i] = system.level_matrix[state, new_state] / 0.5
             end
@@ -163,7 +164,7 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
-function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, new_observation, state2::SizedVector{3})::Float64
+function transition_probability(system::LocalLevelJump, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
     #time = state1[1]
     value = state1[2]
     state = Int(state1[3])
@@ -182,7 +183,7 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3}, 
     return probability
 end
 
-function observation_probability(system::LocalLevelJump, current_state::SizedVector{3}, current_observation)::Float64
+function observation_probability(system::LocalLevelJump, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
     time = current_state[1]
     value = current_state[2]
     state = current_state[3]

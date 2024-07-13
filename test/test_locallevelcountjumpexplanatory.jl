@@ -15,7 +15,7 @@
 
         fcs2 = SMCForecast.fit(Val{LocalLevelCountJumpExplanatory}(), exogenous, low; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{3, Float64}, LocalLevelCountJumpExplanatory}(fcs2, 1000)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatory}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, low)
         println(loglikelihood)
 
