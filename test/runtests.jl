@@ -190,8 +190,11 @@ end
     end
 end
 
+include("test_locallevel.jl")
+include("test_locallevelchange.jl")
 include("test_locallevelcountjump.jl")
 include("test_locallevelexplanatory.jl")
+
 #include("m5_competition.jl")
 
 # @test begin
