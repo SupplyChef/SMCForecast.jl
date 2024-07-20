@@ -1,5 +1,5 @@
 
-struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct LocalLevelCountJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     level1::Float64
     level2::Float64
     
@@ -20,7 +20,7 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
 
     adjust_sampling::Bool
 
-    function LocalLevelJump(;level1, 
+    function LocalLevelCountJump(;level1, 
                              level2, 
                              level_matrix, 
                              level_variance, 
@@ -44,9 +44,9 @@ struct LocalLevelJump <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     end
 end
 
-function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
-    fcs = fit(Val{LocalLevelJump}(), values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64}, LocalLevelJump}(fcs, 1_000)
+function forecast(::Val{LocalLevelCountJump}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
+    fcs = fit(Val{LocalLevelCountJump}(), values; maxtime=maxtime, size=size)
+    smc = SMC{SizedVector{3, Float64}, LocalLevelCountJump}(fcs, 1_000)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -56,12 +56,12 @@ function forecast(::Val{LocalLevelJump}, values, horizon; maxtime=10.0, size=500
     end
 end
 
-function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size=100, 
+function fit(::Val{LocalLevelCountJump}, values; maxtime=10, regularization=0.0, size=100, 
                                     min_overdispersion=0.00001, min_stay_outofstock_probability=0.0001,
                                     adjust_sampling=true,
                                     best_callback=nothing, rng=Random.default_rng())
     println("mean: $(mean(values)) var: $(var(values)) est: $((var(values) - (length(values) * mean(values))) / length(values))")                
-    xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelJump}(), values; regularization=regularization, size=size),
+    xs = SMCForecast.bboptimize2(get_loss_function(Val{LocalLevelCountJump}(), values; regularization=regularization, size=size),
                     [mean(values), 
                      0.00001, 
                      max((var(values) - (length(values) * mean(values))) / length(values),  0.001), 
@@ -71,7 +71,7 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                      max(min_stay_outofstock_probability, 0.9)],
                     Dict(
                         :SearchRange => [(0, maximum(values)), 
-                                        (0.00001, mean(values) / 2), 
+                                        (0.00001, mean(values) / 5), 
                                         (0.00001, var(values) / length(values)),
                                         (0.00001, .9999),
                                         (min_overdispersion, .9999), 
@@ -84,7 +84,7 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
                     rng=rng
                     )
     
-    fcs2 = LocalLevelJump(; level1=xs[1], 
+    fcs2 = LocalLevelCountJump(; level1=xs[1], 
                             level2=xs[2],
                             level_variance=abs(xs[3]), 
                             zero_inflation=abs(xs[4]),
@@ -95,9 +95,9 @@ function fit(::Val{LocalLevelJump}, values; maxtime=10, regularization=0.0, size
     return fcs2
 end
 
-function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, size=1000, adjust_sampling=false)
+function get_loss_function(::Val{LocalLevelCountJump}, values; regularization=0.0, size=1000, adjust_sampling=false)
     return xs -> begin
-        fcs2 = LocalLevelJump(level1=xs[1], 
+        fcs2 = LocalLevelCountJump(level1=xs[1], 
                               level2=xs[2],
                               level_variance=abs(xs[3]), 
                               zero_inflation=abs(xs[4]),
@@ -105,19 +105,19 @@ function get_loss_function(::Val{LocalLevelJump}, values; regularization=0.0, si
                               level_matrix=[1-xs[6] xs[6]; 
                                             1-xs[7] xs[7]],
                               adjust_sampling=adjust_sampling)
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelJump}(fcs2, size)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
 end
 
-function sample_initial_state(system::LocalLevelJump, count; rng=Random.default_rng())
+function sample_initial_state(system::LocalLevelCountJump, count; rng=Random.default_rng())
     states = sample(rng, [1,2], system.level_weights10, count)
     return [SizedVector{3, Float64, Vector{Float64}}(1.0, system.level1, states[i]) for i in eachindex(states)]
 end
 
-function sample_states(system::LocalLevelJump, 
+function sample_states(system::LocalLevelCountJump, 
                        current_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, 
                        next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
@@ -152,7 +152,7 @@ function sample_states(system::LocalLevelJump,
     end
 end
 
-function sample_observation(system::LocalLevelJump, current_state::SizedVector{3}; rng=Random.default_rng())
+function sample_observation(system::LocalLevelCountJump, current_state::SizedVector{3}; rng=Random.default_rng())
     value::Float64 = current_state[2]
     state = Int(current_state[3])
 
@@ -164,7 +164,7 @@ function sample_observation(system::LocalLevelJump, current_state::SizedVector{3
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
-function transition_probability(system::LocalLevelJump, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelCountJump, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
     #time = state1[1]
     value = state1[2]
     state = Int(state1[3])
@@ -183,7 +183,7 @@ function transition_probability(system::LocalLevelJump, state1::SizedVector{3, F
     return probability
 end
 
-function observation_probability(system::LocalLevelJump, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
+function observation_probability(system::LocalLevelCountJump, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
     time = current_state[1]
     value = current_state[2]
     state = current_state[3]
@@ -199,7 +199,7 @@ function observation_probability(system::LocalLevelJump, current_state::SizedVec
     return zigp_pmf(Int(current_observation), value, system.overdispersion, system.zero_inflation)
 end
 
-function average_state(system::LocalLevelJump, states, weights)
+function average_state(system::LocalLevelCountJump, states, weights)
     return SizedVector{3, Float64, Vector{Float64}}([states[1][1], 
                            sum(states[i][2] * weights[i] for i in eachindex(weights)),
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])

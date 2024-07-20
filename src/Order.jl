@@ -6,10 +6,10 @@ function evaluate_order(order::Real, current_inventory::Int64, order_period::Int
     tmp::Vector{Float64} = zeros(Float64, length(weights))
     rounded_order::Int64 = Int(floor(order))
     for i in 1:length(future_observations)
-        if i == order_period
+        if i == order_period + lead_time
             inventory .+= rounded_order 
         end
-        if i <= order_period + lead_time
+        if i < order_period + lead_time
             inventory .= inventory .- future_observations[i]
             inventory .= max.(inventory, 0)
         end
@@ -18,14 +18,17 @@ function evaluate_order(order::Real, current_inventory::Int64, order_period::Int
             tmp .= tmp .- inventory
             tmp .= max.(tmp, 0)
             tmp .= weights .* tmp
+            #print("lost: $tmp ")
             lost_sales_during_coverage += sum(tmp)
             
             tmp .= future_observations[i]
             tmp .= weights .* tmp
+            #println("sales: $tmp ")
             sales_during_coverage += sum(tmp)
             
             inventory .= inventory .- future_observations[i]
             inventory .= max.(inventory, 0)
+            #println("inventory: $inventory")
         end
         if i == cover_until_period
             break

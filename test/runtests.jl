@@ -5,7 +5,10 @@ using SMCForecast
 
 using CSV
 using DataFrames
+using Dates
 using Distributions
+using MLJ
+using Parsers
 using PlotlyJS
 using Random
 using StaticArrays
@@ -183,7 +186,7 @@ end
         #data = sample(rng, obs, pweights(weights))
         data = map(o -> round(o[1]), obs)
 
-        fcs = SMCForecast.fit(Val{LocalLevelJump}(), data; maxtime=60, size=100)
+        fcs = SMCForecast.fit(Val{LocalLevelCountJump}(), data; maxtime=60, size=100)
 
         println(fcs)
         true
@@ -197,105 +200,180 @@ include("test_locallevelexplanatory.jl")
 
 #include("m5_competition.jl")
 
-# @test begin
-#     using Dates
+DecisionTreeRegressor = @load DecisionTreeRegressor pkg=DecisionTree
 
-#     history = 1400
-#     horizon = 500
-#     scenario_count = 1
-#     particle_count = 300
-    
-#     dates = Date(2022, 1, 1) .+ Day.(1:history)
-#     values = rand(Poisson.(20), history)
+function add_exogenous(data)
+    data1 = DataFrame(date=data.date, 
+                      value=data.value, 
+                      day=categorical(day.(data.date)), 
+                      dow=categorical(dayofweek.(data.date)), 
+                      month=categorical(month.(data.date)), 
+                      #year=year.(d), 
+                      #t=map(d -> d.value, Day.(d .- d[1]))
+                      )
 
-#     values[month.(dates) .== 11] .+= rand(Poisson.(10), sum(month.(dates) .== 11))
-#     values[month.(dates) .== 12] .+= rand(Poisson.(20), sum(month.(dates) .== 12))
+    ohe = machine(OneHotEncoder(), data1)  |> MLJ.fit!
+    data2 = MLJ.transform(ohe, data1)
+    return data2
+end
 
-#     event_dates = Date(2022, 1, 1) .+ Day.(1:history+horizon)
-#     events = monthname.(event_dates)
+function create_model(data2)
+    model = DecisionTreeRegressor(max_depth=1, min_samples_split=3)
+    mach = machine(model, data2[:, Not([:date, :value])], data2.value) |> MLJ.fit!
+    return mach
+end
 
-#     values[100] += 30
-#     push!(event_dates, dates[100])
-#     push!(events, "promo");
 
-#     values = values[sortperm(dates)] * 1.0
-#     values = convert(Vector{Union{Missing, Float64}}, values)
-#     dates = sort(dates)
-    
-#     future_dates = maximum(dates) .+ Day.(1:horizon+1)
-    
-#     event_set = Set([(event_dates[i], events[i]) for i in 1:length(event_dates)])
+function load_data()
+    xf =  XLSX.openxlsx(raw"C:\Users\renau\source\repos\SMCForecast\datasets\sample_data.xlsx") 
+    sales4 = DataFrame(XLSX.gettable(xf["data"]))
 
-#     unique_events = collect(unique(events))
-    
-#     one_hot_events = Float64[(date, event) ∈ event_set ? 1.0 : 0.0 for date in dates, event in unique_events]
-#     future_one_hot_events = Float64[(date, event) ∈ event_set ? 1.0 : 0.0 for date in future_dates, event in unique_events, k in 1:scenario_count]
-    
-#     all_dates = vcat(dates, future_dates)
-#     exogenous = Float64[(date, event) ∈ event_set ? 1.0 : 0.0 for event in unique_events, date in all_dates]
-    
-#     intercept = 10.0
-#     coefficients = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30]
-#     ϕ = 1.0
-#     transition_variance = 0.1
-#     observation_variance = 3.0
-#     fcs = ForecastSystem(exogenous, intercept, coefficients, ϕ, transition_variance, observation_variance)
+    gd = first(groupby(sales4, :id), 50)
+    historical_values = Dict(k.id => select(gd[k], :date, :value) for k in keys(gd))
 
-#     dim = 4 + size(exogenous, 1)
-#     res = bboptimize(get_loss_function(fcs, values); 
-#                     SearchRange = (0.0, 15.0), 
-#                     NumDimensions = dim, 
-#                     MaxTime = 160)
+    return historical_values
+end
 
-#     println(best_fitness(res))
-#     println(unique_events)
-#     println(best_candidate(res))
 
-#     xs = best_candidate(res)
-#     fcs2 = ForecastSystem(fcs.exogenous, 
-#                               xs[1], 
-#                               xs[2:(1 + size(fcs.exogenous, 1))],
-#                               xs[1 + size(fcs.exogenous, 1) + 1],
-#                               abs(xs[1 + size(fcs.exogenous, 1) + 2]),
-#                               abs(xs[1 + size(fcs.exogenous, 1) + 3]))
-#     smc = SMC{SizedVector{2}, ForecastSystem}(fcs2, particle_count)
+# Converts the contents in a .tsf file into a dataframe and returns it along with other meta-data of the dataset: frequency, horizon, whether the dataset contains missing values and whether the series have equal lengths
+#
+# Parameters
+# full_file_path_and_name - complete .tsf file path
+# replace_missing_vals_with - a term to indicate the missing values in series in the returning dataframe
+# value_column_name - Any name that is preferred to have as the name of the column containing series values in the returning dataframe
+#
+# Example of usage
+# loaded_data, frequency, forecast_horizon, contain_missing_values, contain_equal_length = convert_tsf_to_dataframe("TSForecasting/tsf_data/sample.tsf")
+function convert_tsf_to_dataframe(full_file_path_and_name::String;
+    replace_missing_vals_with="NaN",
+    value_column_name="series_value")
+    col_names = String[]
+    col_types = String[]
+    all_data = Dict{String, Any}()
+    all_series = Vector{Any}(undef, 0)
+    line_count = 0
+    frequency = nothing
+    forecast_horizon = nothing
+    contain_missing_values = nothing
+    contain_equal_length = nothing
+    found_data_tag = false
+    found_data_section = false
+    started_reading_data_section = false
 
-#     likelihood = SMCForecast.filter!(smc, values)
-    
-#     states, weights = SMCForecast.predict(smc, horizon);
+    open(full_file_path_and_name, "r") do file
+        for line in eachline(file)
+            line = strip(line)
 
-#     #println(exogenous)
-#     #println(values)
+            if !isempty(line)
+                if startswith(line, "@")  # Read meta-data
+                    if !startswith(line, "@data")
+                        line_content = split(line, " ")
+                        if startswith(line, "@attribute")
+                            if length(line_content) != 3  # Attributes have both name and type
+                                throw("Invalid meta-data specification.")
+                            end
 
-#     #println(smc.states)
-#     #println(smc.weights)
-#     plot(vcat([scatter(;x=dates,y=values,line_color="red")],
-#           [scatter(;x=future_dates, y=[states[i][j][2] for i in eachindex(states)], opacity=0.07, line_color="blue") for j in eachindex(states[1])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 90) for i in eachindex(states)])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 50) for i in eachindex(states)])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 10) for i in eachindex(states)])]
-#           ))  
-#     println(likelihood)
+                            push!(col_names, line_content[2])
+                            push!(col_types, line_content[3])
+                        else
+                            if length(line_content) != 2  # Other meta-data have only values
+                                throw("Invalid meta-data specification.")
+                            end
 
-#     smc = SMC{SizedVector{2}, ForecastSystem}(fcs, particle_count)
-#     values2 = copy(values)
-#     values2[500:700] .= missing
-#     likelihood = SMCForecast.filter!(smc, values2)
-#     smoothed_states = smooth(smc, 100)
-    
-#     states, weights = SMCForecast.predict(smc, horizon);
+                            if startswith(line, "@frequency")
+                                frequency = line_content[2]
+                            elseif startswith(line, "@horizon")
+                                forecast_horizon = parse(Int, line_content[2])
+                            elseif startswith(line, "@missing")
+                                contain_missing_values = line_content[2] == "true"
+                            elseif startswith(line, "@equallength")
+                                contain_equal_length = line_content[2] == "true"
+                            end
+                        end
+                    else
+                        if isempty(col_names)
+                            throw("Missing attribute section. Attribute section must come before data.")
+                        end
 
-#     #println(exogenous)
-#     plot(vcat([scatter(;x=dates,y=values,line_color="red")],
-#           [scatter(;x=future_dates, y=[states[i][j][2] for i in eachindex(states)], opacity=0.07, line_color="blue") for j in eachindex(states[1])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 90) for i in eachindex(states)])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 50) for i in eachindex(states)])],
-#           [scatter(;x=future_dates, y=[percentile([states[i][j][2] for j in eachindex(states[i])], 10) for i in eachindex(states)])]
-#           ))  
+                        found_data_tag = true
+                    end
+                elseif !startswith(line, "#")
+                    if isempty(col_names)
+                        throw("Missing attribute section. Attribute section must come before data.")
+                    elseif !found_data_tag
+                        throw("Missing @data tag.")
+                    else
+                        if !started_reading_data_section
+                            started_reading_data_section = true
+                            found_data_section = true
 
-#     println(likelihood)
-#     true
-# end
+                            for col in col_names
+                                all_data[col] = Any[]
+                            end
+                        end
 
-#plot(vcat([scatter(;x=dates,y=values2), scatter(;x=dates,y=[mean(smoothed_states[j][i][2] for j in 1:length(smoothed_states)) for i in 1:length(dates)])],
-#          [scatter(;x=dates,y=[smc.historical_states[i][j]] for j in 1:length(dates)) for i in 1:length(smc.historical_states)]))
+                        full_info = split(line, ":")
+
+                        if length(full_info) != (length(col_names) + 1)
+                            throw("Missing attributes/values in series.")
+                        end
+
+                        numeric_series = Vector{Union{Float64, String}}(undef, 0)
+
+                        for val in eachsplit(full_info[end], ",")
+                            if val == "?"
+                                push!(numeric_series, replace_missing_vals_with)
+                            else
+                                push!(numeric_series, Parsers.parse(Float64, val))
+                            end
+                        end
+
+                        if isempty(numeric_series)
+                            throw("A given series should contain a set of comma-separated numeric values. At least one numeric value should be there in a series. Missing values should be indicated with ? symbol")
+                        end
+                        if count(==(replace_missing_vals_with), numeric_series) == length(numeric_series)
+                            throw("All series values are missing. A given series should contain a set of comma-separated numeric values. At least one numeric value should be there in a series.")
+                        end
+
+                        push!(all_series, numeric_series)
+
+                        for i in eachindex(col_names)
+                            att_val = nothing
+                            if col_types[i] == "numeric"
+                                att_val = parse(Int, full_info[i])
+                            elseif col_types[i] == "string"
+                                att_val = full_info[i]
+                            elseif col_types[i] == "date"
+                                att_val = DateTime(full_info[i], dateformat"yyyy-mm-dd HH-MM-SS")
+                            else
+                                throw("Invalid attribute type.")
+                            end
+
+                            if att_val == nothing
+                                throw("Invalid attribute value.")
+                            else
+                                push!(all_data[col_names[i]], att_val)
+                            end
+                        end
+                    end
+                end
+            end
+            line_count += 1
+        end
+    end
+
+    if line_count == 0
+        throw("Empty file.")
+    end
+    if isempty(col_names)
+        throw("Missing attribute section.")
+    end
+    if !found_data_section
+        throw("Missing series information under data section.")
+    end
+
+    all_data[value_column_name] = all_series
+    loaded_data = DataFrame(all_data)
+
+    return (loaded_data, frequency, forecast_horizon, contain_missing_values, contain_equal_length)
+end

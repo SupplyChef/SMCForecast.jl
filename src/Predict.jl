@@ -18,7 +18,7 @@ end
 
 function cum_percentiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
     values = cumsum([map(s -> s[2], states[i]) for i in 1:length(states)])
-    return [quantile(values, pweights(weights[i]), percentile) for i in 1:length(values)]
+    return [quantile(values[i], pweights(weights[i]), percentile) for i in 1:length(values)]
 end
 
 function cum_percentiles(percentile::Real, obs::Array{Array{R, 1}, 1}, weights) where R <: Real
@@ -36,7 +36,7 @@ function predict_observations(smc::SMC{T, U}, horizon; happy_only=true, rng=Rand
     return observations, weights
 end
 
-function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: LocalLevelJump} 
+function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: LocalLevelCountJump} 
     states = Array{T, 1}[]
     weights = Array{Float64, 1}[]
 

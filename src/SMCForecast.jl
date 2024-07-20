@@ -1,27 +1,27 @@
 module SMCForecast
 
+using CategoricalArrays
 using DataFrames
 using DataStructures
 using Dates
+using Distributions
+import Distributions:rand
 using LinearAlgebra
 using MLJ
-using Optim
 using StatsBase
 using StaticArrays
 using SpecialFunctions
-using Distributions
-import Distributions:rand
+using Tables
 
 export SMC
 export System
 export ForecastSystem
 export LocalLevel
 export LocalLevelChange
-export LocalLevelJump
-export LocalLevelCountJumpExplanatory
-export LocalLevelRegressor
 export LocalLevelExplanatory
-export LocalLevelJumpExplanatory
+export LocalLevelCountJump
+export LocalLevelCountJumpExplanatory
+export LocalLevelCountJumpExplanatoryML
 
 export forecast
 export initialize!
@@ -51,11 +51,10 @@ include("SMC.jl")
 
 include("LocalLevel.jl")
 include("LocalLevelChange.jl")
-include("LocalLevelRegressor.jl")
 include("LocalLevelExplanatory.jl")
 include("LocalLevelCountJump.jl")
-#include("LocalLevelJumpExplanatory.jl")
 include("LocalLevelCountJumpExplanatory.jl")
+include("LocalLevelCountJumpExplanatoryML.jl")
 
 include("Metrics.jl")
 include("Order.jl")
