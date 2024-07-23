@@ -1,5 +1,37 @@
 using Random
 
+
+function expectile(obs, weights, q)
+   p = sortperm(obs)
+
+    total_values = sum(obs .* weights)
+
+    set_value = 0.0
+    moving_weight = sum(weights)
+
+    j = 1
+    for k in 1:maximum(obs)
+        while j <= length(obs) && obs[p[j]] <= k
+            set_value += obs[p[j]] * weights[p[j]]
+            moving_weight -= weights[p[j]]
+            j = j + 1
+        end
+        if set_value + moving_weight * k >= q * total_values
+            return k
+        end
+    end
+end
+
+function cum_expectiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
+    values = cumsum([map(s -> s[2], states[i]) for i in 1:length(states)])
+    return [expectile(values[i], weights[i], percentile) for i in 1:length(values)]
+end
+
+function cum_expectiles(percentile::Real, obs::Array{Array{R, 1}, 1}, weights) where R <: Real
+    obs = cumsum(obs)
+    return [expectile(obs[i], weights[i], percentile) for i in 1:length(obs)]
+end
+
 function avg(states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
     return [sum(map(s -> s[2], states[i]) .* weights[i]) for i in 1:length(states)]
 end

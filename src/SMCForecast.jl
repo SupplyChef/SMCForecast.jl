@@ -31,6 +31,7 @@ export predict_states
 export predict_observations
 export percentiles
 export cum_percentiles
+export cum_expectiles
 
 export MSIS
 export MASE

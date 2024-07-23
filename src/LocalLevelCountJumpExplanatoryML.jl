@@ -1,4 +1,44 @@
-using DecisionTree: apply_tree
+using DecisionTree: Root, Leaf, Node, LeafOrNode#, apply_tree
+
+#import DecisionTree: apply_tree
+
+apply_tree2(leaf::Leaf, feature::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64 = get(overrides, leaf, leaf.majority)
+function apply_tree2(tree::Root{Float64,Float64}, features::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64
+    apply_tree2(tree.node, features, overrides)
+end
+function apply_tree2(tree::Node{Float64,Float64}, features::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64
+    if tree.featid == 0
+        return apply_tree2(tree.left, features, overrides)
+    elseif features[tree.featid] < tree.featval
+        return apply_tree2(tree.left, features, overrides)
+    else
+        return apply_tree2(tree.right, features, overrides)
+    end
+end
+        
+# function apply_tree(tree::Root{S,T}, features::AbstractMatrix{S}, overrides::Dict{Leaf, Float64}) where {S,T}
+#     apply_tree(tree.node, features, overrides)
+# end
+# function apply_tree(tree::LeafOrNode{S,T}, features::AbstractMatrix{S}, overrides::Dict{Leaf, Float64}) where {S,T}
+#     N = size(features, 1)
+#     predictions = Array{T}(undef, N)
+#     for i in 1:N
+#         predictions[i] = apply_tree(tree, features[i, :], overrides)
+#     end
+#     return predictions
+# end
+
+get_leaves(leaf::Leaf)=[leaf]
+function get_leaves(tree::Root{S,T}) where {S,T}
+    get_leaves(tree.node)
+end
+function get_leaves(tree::Node{S,T}) where {S,T}
+    if tree.featid == 0
+        return get_leaves(tree.left)
+    else 
+        return vcat(get_leaves(tree.left), get_leaves(tree.right))
+    end
+end
 
 struct LocalLevelCountJumpExplanatoryML <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     exogenous::Matrix{Float64}
@@ -23,9 +63,9 @@ struct LocalLevelCountJumpExplanatoryML <: SMCSystem{SizedVector{3, Float64, Vec
 
     adjust_sampling::Bool
 
-    texogenous
+    coefficients::IdDict{Leaf, Float64}
 
-    function LocalLevelCountJumpExplanatoryML(;exogenous, level1, level2, level_matrix, machine, level_variance, zero_inflation, overdispersion, adjust_sampling=false)
+    function LocalLevelCountJumpExplanatoryML(;exogenous, level1, level2, level_matrix, machine, level_variance, zero_inflation, overdispersion, adjust_sampling=false, coefficients=IdDict{Leaf, Float64}())
         levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
@@ -42,7 +82,7 @@ struct LocalLevelCountJumpExplanatoryML <: SMCSystem{SizedVector{3, Float64, Vec
             overdispersion,
             exp(-level2), level_weights, level_weights10, level_equal_weights, 
             adjust_sampling,
-            collect(exogenous'))
+            coefficients)
     end
 end
 
@@ -59,33 +99,40 @@ function forecast(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values, ho
 end
 
 function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime=10, regularization=0.0, size=100,
-                                                                        min_stay_outofstock_probability=0.0001)
+                                                                        min_stay_outofstock_probability=0.0001, 
+                                                                        rng=Random.default_rng())
 
     DecisionTreeRegressor = @load DecisionTreeRegressor pkg=DecisionTree
     model = DecisionTreeRegressor(max_depth=5, min_samples_split=30)
-    mach = machine(model, table(exogenous[:,1:length(values)]'), values) |> MLJ.fit!
+    mach = machine(model, table(exogenous[:, 1:length(values)]'), values) |> MLJ.fit!
+
+    leaves = get_leaves(mach.fitresult[1])
 
     loss_function = get_loss_function(Val{LocalLevelCountJumpExplanatoryML}(), exogenous, values, mach; regularization=regularization, size=size)
     
     dim = 7
 
     xs = bboptimize2(loss_function,
-                       [values[1], 
+                       vcat([values[1], 
                         0.00001, 
                         max((var(values) - (length(values) * mean(values))) / length(values),  0.001), 
                         0.0, 
                         0.0, 
                         0.1, 
                         max(0.00001, 0.9)],
-                    Dict(:SearchRange => [(0, maximum(values)), 
-                                            (0.00001, mean(values) / 5), 
-                                            (0.00001, var(values) / length(values)),
-                                            (0.00001, .9999),
-                                            (0.00001, .9999), 
-                                            (0.00001, .9999), 
-                                            (min_stay_outofstock_probability, .9999)],
-                         :NumDimensions => dim, 
-                         :MaxTime => maxtime)
+                        [leaf.majority for leaf in leaves]
+                       ),
+                        Dict(:SearchRange => vcat([(0, maximum(values)), 
+                                                (0.00001, mean(values) / 5), 
+                                                (0.00001, var(values) / length(values)),
+                                                (0.00001, .9999),
+                                                (0.00001, .9999), 
+                                                (0.00001, .9999), 
+                                                (min_stay_outofstock_probability, .9999)],
+                                                [(leaf.majority - 1, leaf.majority + 1) for leaf in leaves]),
+                        :NumDimensions => dim, 
+                        :MaxTime => maxtime),
+                        rng=rng
                     )
 
     fcs2 = LocalLevelCountJumpExplanatoryML(;exogenous=exogenous, 
@@ -96,11 +143,14 @@ function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime
                                             zero_inflation=abs(xs[4]),
                                             overdispersion=abs(xs[5]),
                                             level_matrix=[1-xs[6] xs[6]; 
-                                                        1-xs[7] xs[7]])
+                                                        1-xs[7] xs[7]],
+                                            coefficients=IdDict(l => xs[7 + i] for (i, l) in enumerate(leaves)))
     return fcs2
 end
 
 function get_loss_function(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values, mach; regularization=0.0, size=1000)
+    leaves = get_leaves(mach.fitresult[1])
+    
     return xs -> begin
         fcs2 = LocalLevelCountJumpExplanatoryML(;exogenous=exogenous, 
                                                 machine = mach,
@@ -110,7 +160,8 @@ function get_loss_function(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, v
                                                 zero_inflation=abs(xs[4]),
                                                 overdispersion=abs(xs[5]),
                                                 level_matrix=[1-xs[6] xs[6]; 
-                                                            1-xs[7] xs[7]]
+                                                            1-xs[7] xs[7]],
+                                                coefficients=IdDict(l => xs[7 + i] for (i, l) in enumerate(leaves))
                               )
         smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatoryML}(fcs2, size)
         rng = MersenneTwister(1)
@@ -121,18 +172,27 @@ end
 
 function sample_initial_state(system::LocalLevelCountJumpExplanatoryML, count; rng=Random.default_rng())::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
     states = sample(rng, [1, 2], pweights([0.9, 0.1]), count)
-    return [SizedVector{3, Float64, Vector{Float64}}(0.0, system.level1, states[i]) for i in eachindex(states)]
+    return [SizedVector{3, Float64, Vector{Float64}}(1.0, system.level1, states[i]) for i in eachindex(states)]
 end
 
 function sample_states(system::LocalLevelCountJumpExplanatoryML, 
                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}},
                       next_observation::Union{Missing, Float64}, 
-                      new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
+                      new_states::Vector{SizedVector{3, Float64, Vector{Float64}}}, 
+                      sampling_probabilities::Vector{Float64}; 
+                      happy_only=false, rng=Random.default_rng())
     time = Int(current_states[1][1])
 
+    @views exogenous_time::Vector{Float64} = system.exogenous[:, time]
+    @views exogenous_time_plus_1::Vector{Float64} = system.exogenous[:, time + 1]
+    overrides::IdDict{Leaf, Float64} = system.coefficients
+    result::Root{Float64, Float64} = system.machine.fitresult[1]
     for (i, current_state) in enumerate(current_states)
+        value = de_exogenous_ml(current_state, result, exogenous_time, overrides)
         state = Int(current_state[3])
         sampling_probabilities[i] = 1
+
+        n = Normal(0, sqrt(system.level_variance))
 
         new_state = sample(rng, system.levels, system.level_weights[state])
         if happy_only
@@ -146,12 +206,11 @@ function sample_states(system::LocalLevelCountJumpExplanatoryML,
             end
         end
 
-        #println(size(system.exogenous))
-        #@views new_value = MLJ.predict(system.machine, Tables.table(system.exogenous[:, time + 1]'))[1]
-        @views new_value = apply_tree(system.machine.fitresult[1], system.exogenous[:, time + 1])
+        ϵ = rand(rng, n)
+        new_value = max(value + ϵ, system.level2)
 
         new_states[i][1] = time + 1
-        new_states[i][2] = new_value
+        new_states[i][2] = re_exogenous_ml(new_value, system, result, exogenous_time_plus_1)
         new_states[i][3] = new_state
     end
 end
@@ -168,13 +227,30 @@ function sample_observation(system::LocalLevelCountJumpExplanatoryML, current_st
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
-function transition_probability(system::LocalLevelCountJumpExplanatoryML, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelCountJumpExplanatoryML, 
+                                state1::SizedVector{3, Float64, Vector{Float64}}, 
+                                new_observation, 
+                                state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+    result::Root{Float64, Float64} = system.machine.fitresult[1]
+    overrides::IdDict{Leaf, Float64} = system.coefficients
+    
     time = Int(state1[1])
+    @views exogenous_time::Vector{Float64} = system.exogenous[:, time]
+    value = de_exogenous_ml(state1, result, exogenous_time, overrides)
     state = Int(state1[3])
 
+    new_time = Int(state2[1])
+    @views exogenous_newtime::Vector{Float64} = system.exogenous[:, new_time]
+    new_value = de_exogenous_ml(state2, result, exogenous_newtime, overrides)
     new_state = Int(state2[3])
     
-    probability = system.level_matrix[state, new_state] 
+    n = Normal(0, sqrt(system.level_variance))
+    if new_value > system.level2
+        p = pdf(n, new_value - value)
+    else
+        p = cdf(n, new_value - value)
+    end
+    probability = system.level_matrix[state, new_state] * p
 
     return probability
 end
@@ -199,4 +275,33 @@ function average_state(system::LocalLevelCountJumpExplanatoryML, states, weights
     return SizedVector{3, Float64, Vector{Float64}}([states[1][1], 
                            sum(states[i][2] * weights[i] for i in eachindex(weights)), 
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])
+end
+function de_exogenous_ml(state::SizedVector{3, Float64, Vector{Float64}}, 
+                        result::Root{Float64, Float64}, 
+                        exogenous::AbstractVector{Float64},
+                        overrides::IdDict{Leaf, Float64})::Float64
+    time::Int64 = Int(state[1])
+    value::Float64 = state[2]
+    if time == 0
+        return value
+    end
+    
+    #machine::Root{Float64, Float64} = system.machine.fitresult[1]
+    estimate::Float64 = apply_tree2(result, exogenous, overrides)
+    
+    return value - estimate
+end
+
+function re_exogenous_ml(value::Float64, 
+                        system::LocalLevelCountJumpExplanatoryML, 
+                        result::Root{Float64, Float64}, 
+                        exogenous::Vector{Float64})::Float64
+    if time == 0
+        return value
+    end
+    
+    #machine::Root{Float64, Float64} = system.machine.fitresult[1]
+    estimate::Float64 = apply_tree2(result, exogenous, system.coefficients)
+    
+    return value + estimate
 end

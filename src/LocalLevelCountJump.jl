@@ -245,6 +245,9 @@ end
 
 # Compute the PMF of the Zero-Inflated Generalized Poisson Distribution
 function zigp_pmf(k::Int, lambda::Float64, theta::Float64, pi::Float64)
+    if lambda < 0
+        return 0.0
+    end
     if k == 0
         p_zero = pi + (1 - pi) * exp(-lambda)
         return p_zero
