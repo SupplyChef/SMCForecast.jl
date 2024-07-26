@@ -1,4 +1,4 @@
-using DecisionTree: Root, Leaf, Node, LeafOrNode#, apply_tree
+using DecisionTree: Root, Leaf, Node, LeafOrNode, print_tree#, apply_tree
 
 #import DecisionTree: apply_tree
 
@@ -17,15 +17,15 @@ struct MutableRoot
     node::Union{MutableLeaf, MutableNode}
 end
 
-copy_tree2(leaf::Leaf, overrides::IdDict{Leaf{Float64}, Float64})::MutableLeaf = MutableLeaf(get(overrides, leaf, leaf.majority))
-function copy_tree2(tree::Root{Float64,Float64}, overrides::IdDict{Leaf{Float64}, Float64})::MutableRoot
-    return MutableRoot(copy_tree2(tree.node, overrides))
+copy_tree1(leaf::Leaf, overrides::IdDict{Leaf{Float64}, Float64})::MutableLeaf = MutableLeaf(get(overrides, leaf, leaf.majority))
+function copy_tree1(tree::Root{Float64,Float64}, overrides::IdDict{Leaf{Float64}, Float64})::MutableRoot
+    return MutableRoot(copy_tree1(tree.node, overrides))
 end
-function copy_tree2(tree::Node{Float64,Float64}, overrides::IdDict{Leaf{Float64}, Float64})::MutableNode
+function copy_tree1(tree::Node{Float64,Float64}, overrides::IdDict{Leaf{Float64}, Float64})::MutableNode
     if tree.featid == 0
-        return MutableNode(tree.featid, 0.0, copy_tree2(tree.left, overrides), nothing)
+        return MutableNode(tree.featid, 0.0, copy_tree1(tree.left, overrides), nothing)
     else
-        return MutableNode(tree.featid, tree.featval, copy_tree2(tree.left, overrides), copy_tree2(tree.right, overrides))
+        return MutableNode(tree.featid, tree.featval, copy_tree1(tree.left, overrides), copy_tree1(tree.right, overrides))
     end
 end
 
@@ -43,32 +43,6 @@ function apply_tree1(tree::MutableNode, features::AbstractVector{Float64})::Floa
     end
 end
 
-apply_tree2(leaf::Leaf, feature::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64 = get(overrides, leaf, leaf.majority)
-function apply_tree2(tree::Root{Float64,Float64}, features::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64
-    apply_tree2(tree.node, features, overrides)
-end
-function apply_tree2(tree::Node{Float64,Float64}, features::AbstractVector{Float64}, overrides::IdDict{Leaf, Float64})::Float64
-    if tree.featid == 0
-        return apply_tree2(tree.left, features, overrides)
-    elseif features[tree.featid] < tree.featval
-        return apply_tree2(tree.left, features, overrides)
-    else
-        return apply_tree2(tree.right, features, overrides)
-    end
-end
-        
-# function apply_tree(tree::Root{S,T}, features::AbstractMatrix{S}, overrides::Dict{Leaf, Float64}) where {S,T}
-#     apply_tree(tree.node, features, overrides)
-# end
-# function apply_tree(tree::LeafOrNode{S,T}, features::AbstractMatrix{S}, overrides::Dict{Leaf, Float64}) where {S,T}
-#     N = size(features, 1)
-#     predictions = Array{T}(undef, N)
-#     for i in 1:N
-#         predictions[i] = apply_tree(tree, features[i, :], overrides)
-#     end
-#     return predictions
-# end
-
 get_leaves(leaf::Leaf)=[leaf]
 function get_leaves(tree::Root{S,T}) where {S,T}
     get_leaves(tree.node)
@@ -78,6 +52,31 @@ function get_leaves(tree::Node{S,T}) where {S,T}
         return get_leaves(tree.left)
     else 
         return vcat(get_leaves(tree.left), get_leaves(tree.right))
+    end
+end
+
+function print_tree1(root::MutableRoot, featnames=[])
+    print_tree1(root.node, featnames)
+end
+function print_tree1(leaf::MutableLeaf, featnames=[], indent=0)
+    return " " ^ (indent - 3) * "$(leaf.majority)\n"
+end
+function print_tree1(tree::MutableNode, featnames=[], indent=0)
+    if tree.featid == 0
+        return print_tree1(tree.left, featnames, indent)
+    else 
+        lead1 = ""
+        #if indent > 0
+            lead1 = " " ^ (indent) * "├─ " 
+        #end
+        lead2 = ""
+        #if indent > 0
+            lead2 = " " ^ (indent) * "└─ "
+        #end
+        return "$(featnames[tree.featid]) < $(tree.featval) ?\n" * 
+                lead1 * print_tree1(tree.left, featnames, indent+3) *
+                #* "$(featnames[tree.featid]) >= $(tree.featval)\n" * 
+                lead2 * print_tree1(tree.right, featnames, indent+3) 
     end
 end
 
@@ -138,11 +137,27 @@ end
 
 function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime=10, regularization=0.0, size=100,
                                                                         min_stay_outofstock_probability=0.0001, 
-                                                                        rng=Random.default_rng())
+                                                                        rng=Random.default_rng(),
+                                                                        adjust_sampling=true,)
+
+    fcs = SMCForecast.fit(Val{LocalLevelCountJump}(), values * 1.0; maxtime=20, size=120, rng=rng)
+
+    smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs, 500)
+    filtered_states, likelihood = SMCForecast.filter!(smc, values * 1.0; record=true, rng=rng)
+    smoothed_states = smooth(smc, 200; rng=rng)
+
+    smoothed_values = [mean(smoothed_states[j][i][2] for j in 1:length(smoothed_states)) for i in 1:length(smoothed_states[1])]
+    #smoothed_stockouts = [mean(smoothed_states[j][i][3] for j in 1:length(smoothed_states)) for i in 1:length(d)]
+    stockouts = [mean(smoothed_states[j][i][3] for j in 1:length(smoothed_states)) for i in 1:length(smoothed_states[1])] .> 1.90
+
+    filtered_values = (values .- smoothed_values)[stockouts .== false]
+    filtered_exogenous = exogenous[:, 1:length(values)][:, stockouts .== false]
 
     DecisionTreeRegressor = @load DecisionTreeRegressor pkg=DecisionTree
-    model = DecisionTreeRegressor(max_depth=5, min_samples_split=30)
-    mach = MLJ.machine(model, table(exogenous[:, 1:length(values)]'), values) |> MLJ.fit!
+    model = DecisionTreeRegressor(max_depth=4, min_samples_leaf=1)
+    mach = MLJ.machine(model, table(filtered_exogenous'), filtered_values) |> MLJ.fit!
+
+    print_tree(mach.fitresult[1])
 
     leaves = get_leaves(mach.fitresult[1])
 
@@ -151,13 +166,13 @@ function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime
     dim = 7
 
     xs = bboptimize2(loss_function,
-                       vcat([values[1], 
-                        0.00001, 
-                        max((var(values) - (length(values) * mean(values))) / length(values),  0.001), 
-                        0.0, 
-                        0.0, 
-                        0.1, 
-                        max(0.00001, 0.9)],
+                       vcat([fcs.level1, 
+                        fcs.level2, 
+                        fcs.level_variance,
+                        fcs.zero_inflation, 
+                        fcs.overdispersion, 
+                        fcs.level_matrix[1, 2], 
+                        fcs.level_matrix[2, 2]],
                         [leaf.majority for leaf in leaves]
                        ),
                         Dict(:SearchRange => vcat([(0, maximum(values)), 
@@ -167,13 +182,21 @@ function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime
                                                 (0.00001, .9999), 
                                                 (0.00001, .9999), 
                                                 (min_stay_outofstock_probability, .9999)],
-                                                [(leaf.majority - 1, leaf.majority + 1) for leaf in leaves]),
+                                                [(min(leaf.majority, 0.0), max(leaf.majority, 0.0)) for leaf in leaves]),
                         :NumDimensions => dim, 
                         :MaxTime => maxtime),
-                        rng=rng
+                        rng=rng,
+                        x1 = vcat([fcs.level1, 
+                                    fcs.level2, 
+                                    fcs.level_variance,
+                                    fcs.zero_inflation, 
+                                    fcs.overdispersion, 
+                                    fcs.level_matrix[1, 2], 
+                                    fcs.level_matrix[2, 2]],
+                                    [0.0 for leaf in leaves]),
                     )
 
-    machine = copy_tree2(mach.fitresult[1], IdDict(l => xs[7 + i] for (i, l) in enumerate(leaves)))
+    machine = copy_tree1(mach.fitresult[1], IdDict(l => xs[7 + i] for (i, l) in enumerate(leaves)))
     fcs2 = LocalLevelCountJumpExplanatoryML(;exogenous=exogenous, 
                                             machine = machine,
                                             level1=xs[1], 
@@ -182,15 +205,17 @@ function fit(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values; maxtime
                                             zero_inflation=abs(xs[4]),
                                             overdispersion=abs(xs[5]),
                                             level_matrix=[1-xs[6] xs[6]; 
-                                                        1-xs[7] xs[7]])
+                                                        1-xs[7] xs[7]],
+                                            adjust_sampling=adjust_sampling)
     return fcs2
 end
 
-function get_loss_function(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values, mach; regularization=0.0, size=1000)
+function get_loss_function(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, values, mach; regularization=0.0, size=1000, adjust_sampling=false)
     leaves = get_leaves(mach.fitresult[1])
-    machine = copy_tree2(mach.fitresult[1], IdDict(l => values[7 + i] for (i, l) in enumerate(leaves)))
     
     return xs -> begin
+        machine = copy_tree1(mach.fitresult[1], IdDict(l => xs[7 + i] for (i, l) in enumerate(leaves)))
+    
         fcs2 = LocalLevelCountJumpExplanatoryML(;exogenous=exogenous, 
                                                 machine = machine,
                                                 level1=xs[1], 
@@ -199,17 +224,22 @@ function get_loss_function(::Val{LocalLevelCountJumpExplanatoryML}, exogenous, v
                                                 zero_inflation=abs(xs[4]),
                                                 overdispersion=abs(xs[5]),
                                                 level_matrix=[1-xs[6] xs[6]; 
-                                                            1-xs[7] xs[7]])
+                                                            1-xs[7] xs[7]],
+                                                adjust_sampling=adjust_sampling)
         smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatoryML}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
-        return -likelihood 
+
+        return -likelihood + regularization * sum(x^2 for x in xs[8:end])
     end
 end
 
 function sample_initial_state(system::LocalLevelCountJumpExplanatoryML, count; rng=Random.default_rng())::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
-    states = sample(rng, [1, 2], pweights([0.9, 0.1]), count)
-    return [SizedVector{3, Float64, Vector{Float64}}(1.0, system.level1, states[i]) for i in eachindex(states)]
+    @views exogenous_time::AbstractVector{Float64} = system.exogenous[:, 1]
+    result::MutableRoot = system.machine
+    
+    states = sample(rng, [1,2], system.level_weights10, count)
+    return [SizedVector{3, Float64, Vector{Float64}}(1.0, re_exogenous_ml(system.level1, result, exogenous_time), states[i]) for i in eachindex(states)]
 end
 
 function sample_states(system::LocalLevelCountJumpExplanatoryML, 
@@ -226,11 +256,13 @@ function sample_states(system::LocalLevelCountJumpExplanatoryML,
     for (i, current_state) in enumerate(current_states)
         value = de_exogenous_ml(current_state, result, exogenous_time)
         state = Int(current_state[3])
+
         sampling_probabilities[i] = 1
 
         n = Normal(0, sqrt(system.level_variance))
 
-        new_state = sample(rng, system.levels, system.level_weights[state])
+        #new_state = sample(rng, system.levels, system.level_weights[state])
+        @inbounds new_state = (rand(rng) > system.level_matrix[state, 1]) + 1
         if happy_only
             while new_state == 2
                 new_state = sample(rng, system.levels, system.level_weights[state])
@@ -241,7 +273,6 @@ function sample_states(system::LocalLevelCountJumpExplanatoryML,
                 sampling_probabilities[i] = system.level_matrix[state, new_state] / 0.5
             end
         end
-
         ϵ = rand(rng, n)
         new_value = max(value + ϵ, system.level2)
 

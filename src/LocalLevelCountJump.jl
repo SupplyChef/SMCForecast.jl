@@ -108,6 +108,7 @@ function get_loss_function(::Val{LocalLevelCountJump}, values; regularization=0.
         smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
+
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
 end

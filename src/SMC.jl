@@ -178,7 +178,7 @@ function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T
     return all_smoothed_states
 end
 
-function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=nothing, rng=Random.default_rng())
+function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=nothing, rng=Random.default_rng(), x1=nothing)
     start = Dates.now()
     latest = start
 
@@ -201,6 +201,21 @@ function bboptimize2(f, x0, params; quiet=false, pool_size=12, best_callback=not
     #println(candidate_pool)
     pool_f = [f(candidate) for candidate in candidate_pool]
     #println(pool_f)
+
+    if !isnothing(x1)
+        candidate_pool[2] = copy(x1)
+        pool_f[2] = f(x1)
+    end
+
+    for i in 1:length(pool_f)
+        if pool_f[i] < best_f
+            best_f = pool_f[i]
+            best_x = copy(candidate_pool[i])
+        end
+    end
+
+    println(best_x)
+    println("** $best_f")
 
     t = max(0.1, min(0.9, 8 / length(x0)))
     #println(t)
