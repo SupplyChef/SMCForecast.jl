@@ -1,4 +1,4 @@
-struct LocalLevelCountJumpExplanatory <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct LocalLevelCountStockoutExplanatory <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
     exogenous::Matrix{Float64}
 
     level1::Float64
@@ -21,7 +21,7 @@ struct LocalLevelCountJumpExplanatory <: SMCSystem{SizedVector{3, Float64, Vecto
 
     adjust_sampling::Bool
 
-    function LocalLevelCountJumpExplanatory(;exogenous, level1, level2, level_matrix, coefficients, level_variance, zero_inflation, overdispersion, adjust_sampling=false)
+    function LocalLevelCountStockoutExplanatory(;exogenous, level1, level2, level_matrix, coefficients, level_variance, zero_inflation, overdispersion, adjust_sampling=false)
         levels = [1, 2]
         level_weights = [pweights(level_matrix[i,:]) for i in 1:size(level_matrix, 1)]
         level_weights10 = pweights((level_matrix^10)[1,:])
@@ -41,9 +41,9 @@ struct LocalLevelCountJumpExplanatory <: SMCSystem{SizedVector{3, Float64, Vecto
     end
 end
 
-function forecast(::Val{LocalLevelCountJumpExplanatory}, exogenous, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
-    fcs = fit(Val{LocalLevelCountJumpExplanatory}(), exogenous, values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64}, LocalLevelCountJumpExplanatory}(fcs, 1_000)
+function forecast(::Val{LocalLevelCountStockoutExplanatory}, exogenous, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
+    fcs = fit(Val{LocalLevelCountStockoutExplanatory}(), exogenous, values; maxtime=maxtime, size=size)
+    smc = SMC{SizedVector{3, Float64}, LocalLevelCountStockoutExplanatory}(fcs, 1_000)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -53,9 +53,9 @@ function forecast(::Val{LocalLevelCountJumpExplanatory}, exogenous, values, hori
     end
 end
 
-function fit(::Val{LocalLevelCountJumpExplanatory}, exogenous, values; maxtime=10, regularization=0.0, size=100,
+function fit(::Val{LocalLevelCountStockoutExplanatory}, exogenous, values; maxtime=10, regularization=0.0, size=100,
                                                                         min_stay_outofstock_probability=0.0001)
-    loss_function = get_loss_function(Val{LocalLevelCountJumpExplanatory}(), exogenous, values; regularization=regularization, size=size)
+    loss_function = get_loss_function(Val{LocalLevelCountStockoutExplanatory}(), exogenous, values; regularization=regularization, size=size)
     
     dim = 7 + Base.size(exogenous, 1)
 
@@ -82,7 +82,7 @@ function fit(::Val{LocalLevelCountJumpExplanatory}, exogenous, values; maxtime=1
                          :MaxTime => maxtime)
                          )
 
-    fcs2 = LocalLevelCountJumpExplanatory(;exogenous=exogenous, 
+    fcs2 = LocalLevelCountStockoutExplanatory(;exogenous=exogenous, 
                                             level1=xs[1], 
                                             level2=xs[2],
                                             level_variance=abs(xs[3]), 
@@ -94,9 +94,9 @@ function fit(::Val{LocalLevelCountJumpExplanatory}, exogenous, values; maxtime=1
     return fcs2
 end
 
-function get_loss_function(::Val{LocalLevelCountJumpExplanatory}, exogenous, values; regularization=0.0, size=1000)
+function get_loss_function(::Val{LocalLevelCountStockoutExplanatory}, exogenous, values; regularization=0.0, size=1000)
     return xs -> begin
-        fcs2 = LocalLevelCountJumpExplanatory(;exogenous=exogenous, 
+        fcs2 = LocalLevelCountStockoutExplanatory(;exogenous=exogenous, 
                                                 level1=xs[1], 
                                                 level2=xs[2],
                                                 level_variance=abs(xs[3]), 
@@ -106,19 +106,19 @@ function get_loss_function(::Val{LocalLevelCountJumpExplanatory}, exogenous, val
                                                             1-xs[7] xs[7]],
                                                 coefficients=xs[8:(7 + Base.size(exogenous, 1))]
                               )
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatory}(fcs2, size)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockoutExplanatory}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
         return -likelihood + regularization * sum(x^2 for x in xs[8:end])
     end
 end
 
-function sample_initial_state(system::LocalLevelCountJumpExplanatory, count; rng=Random.default_rng())::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
+function sample_initial_state(system::LocalLevelCountStockoutExplanatory, count; rng=Random.default_rng())::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
     states = sample(rng, [1,2], pweights([0.9, 0.1]), count)
     return [SizedVector{3, Float64, Vector{Float64}}(1.0, system.level1, states[i]) for i in eachindex(states)]
 end
 
-function sample_states(system::LocalLevelCountJumpExplanatory, 
+function sample_states(system::LocalLevelCountStockoutExplanatory, 
                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}},
                       next_observation::Union{Missing, Float64}, 
                       new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
@@ -152,7 +152,7 @@ function sample_states(system::LocalLevelCountJumpExplanatory,
     end
 end
 
-function sample_observation(system::LocalLevelCountJumpExplanatory, current_state::SizedVector{3}; rng=Random.default_rng())
+function sample_observation(system::LocalLevelCountStockoutExplanatory, current_state::SizedVector{3}; rng=Random.default_rng())
     value::Float64 = current_state[2]
     state = Int(current_state[3])
 
@@ -164,7 +164,7 @@ function sample_observation(system::LocalLevelCountJumpExplanatory, current_stat
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
-function transition_probability(system::LocalLevelCountJumpExplanatory, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelCountStockoutExplanatory, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
     time = Int(state1[1])
     value = de_exogenous_multiplicative(state1, system.exogenous, system.coefficients)
     state = Int(state1[3])
@@ -183,7 +183,7 @@ function transition_probability(system::LocalLevelCountJumpExplanatory, state1::
     return probability
 end
 
-function observation_probability(system::LocalLevelCountJumpExplanatory, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
+function observation_probability(system::LocalLevelCountStockoutExplanatory, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
     time = current_state[1]
     value = current_state[2]
     state = current_state[3]
@@ -199,7 +199,7 @@ function observation_probability(system::LocalLevelCountJumpExplanatory, current
     return zigp_pmf(Int(current_observation), value, system.overdispersion, system.zero_inflation)
 end
 
-function average_state(system::LocalLevelCountJumpExplanatory, states, weights)
+function average_state(system::LocalLevelCountStockoutExplanatory, states, weights)
     return SizedVector{3, Float64, Vector{Float64}}([states[1][1], 
                            sum(states[i][2] * weights[i] for i in eachindex(weights)), 
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])

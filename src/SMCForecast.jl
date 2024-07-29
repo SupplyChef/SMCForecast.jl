@@ -19,9 +19,9 @@ export ForecastSystem
 export LocalLevel
 export LocalLevelChange
 export LocalLevelExplanatory
-export LocalLevelCountJump
-export LocalLevelCountJumpExplanatory
-export LocalLevelCountJumpExplanatoryML
+export LocalLevelCountStockout
+export LocalLevelCountStockoutExplanatory
+export LocalLevelCountStockoutExplanatoryML
 
 export forecast
 export initialize!
@@ -53,9 +53,9 @@ include("SMC.jl")
 include("LocalLevel.jl")
 include("LocalLevelChange.jl")
 include("LocalLevelExplanatory.jl")
-include("LocalLevelCountJump.jl")
-include("LocalLevelCountJumpExplanatory.jl")
-include("LocalLevelCountJumpExplanatoryML.jl")
+include("LocalLevelCountStockout.jl")
+include("LocalLevelCountStockoutExplanatory.jl")
+include("LocalLevelCountStockoutExplanatoryML.jl")
 
 include("Metrics.jl")
 include("Order.jl")

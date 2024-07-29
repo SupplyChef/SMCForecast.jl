@@ -186,7 +186,7 @@ end
         #data = sample(rng, obs, pweights(weights))
         data = map(o -> round(o[1]), obs)
 
-        fcs = SMCForecast.fit(Val{LocalLevelCountJump}(), data; maxtime=60, size=100)
+        fcs = SMCForecast.fit(Val{LocalLevelCountStockout}(), data; maxtime=60, size=100)
 
         println(fcs)
         true
@@ -195,7 +195,7 @@ end
 
 include("test_locallevel.jl")
 include("test_locallevelchange.jl")
-include("test_locallevelcountjump.jl")
+include("test_LocalLevelCountStockout.jl")
 include("test_locallevelexplanatory.jl")
 
 #include("m5_competition.jl")

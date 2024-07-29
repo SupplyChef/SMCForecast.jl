@@ -1,4 +1,4 @@
-@testitem "LocalLevelCountJumpExplanatory" begin
+@testitem "LocalLevelCountStockoutExplanatory" begin
     using SMCForecast
     using CSV
     using DataFrames
@@ -13,9 +13,9 @@
         
         exogenous = [mod1(j, 12) == i for i in 2:12, j in 1:length(low)+200] * 1.0
 
-        fcs2 = SMCForecast.fit(Val{LocalLevelCountJumpExplanatory}(), exogenous, low; regularization=0.01, maxtime=60)
+        fcs2 = SMCForecast.fit(Val{LocalLevelCountStockoutExplanatory}(), exogenous, low; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatory}(fcs2, 1000)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockoutExplanatory}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, low)
         println(loglikelihood)
 

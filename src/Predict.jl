@@ -68,7 +68,7 @@ function predict_observations(smc::SMC{T, U}, horizon; happy_only=true, rng=Rand
     return observations, weights
 end
 
-function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: LocalLevelCountJump} 
+function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: LocalLevelCountStockout} 
     states = Array{T, 1}[]
     weights = Array{Float64, 1}[]
 

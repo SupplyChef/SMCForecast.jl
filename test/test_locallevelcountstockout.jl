@@ -1,4 +1,4 @@
-@testitem "LocalLevelCountJump" begin
+@testitem "LocalLevelCountStockout" begin
     using SMCForecast
     using Distributions
     using Random
@@ -9,9 +9,9 @@
         low[800:1100] .= rand(Poisson(0.2), 301)
         low[200] = 5 * maximum(low)
 
-        fcs2 = SMCForecast.fit(Val{LocalLevelCountJump}(), low * 1.0; maxtime=30, size=200, regularization=0.00)
+        fcs2 = SMCForecast.fit(Val{LocalLevelCountStockout}(), low * 1.0; maxtime=30, size=200, regularization=0.00)
 
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs2, 1000)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(fcs2, 1000)
         filtered_states, loglikelihood2 = SMCForecast.filter!(smc, low * 1.0)
         println(loglikelihood2)
 
@@ -28,9 +28,9 @@
         low[800:1100] .= rand(Poisson(0.2), 301)
         low[200] = 5 * maximum(low)
 
-        fcs2 = SMCForecast.fit(Val{LocalLevelCountJump}(), low * 1.0; maxtime=30, size=200, regularization=0.00, best_callback=(best_f, best_x) -> println("$best_f, $best_x"))
+        fcs2 = SMCForecast.fit(Val{LocalLevelCountStockout}(), low * 1.0; maxtime=30, size=200, regularization=0.00, best_callback=(best_f, best_x) -> println("$best_f, $best_x"))
 
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs2, 1000)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(fcs2, 1000)
         filtered_states, loglikelihood2 = SMCForecast.filter!(smc, low * 1.0)
         println(loglikelihood2)
 

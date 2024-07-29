@@ -1,4 +1,4 @@
-@testitem "LocalLevelCountJumpExplanatoryML" begin
+@testitem "LocalLevelCountStockoutExplanatoryML" begin
     using SMCForecast
     using CSV
     using DataFrames
@@ -14,9 +14,9 @@
         
         exogenous = [mod1(j, 12) == i for i in 2:12, j in 1:length(low)] * 1.0
 
-        fcs = SMCForecast.fit(Val{LocalLevelCountJump}(), low[1:20]; maxtime=5)
+        fcs = SMCForecast.fit(Val{LocalLevelCountStockout}(), low[1:20]; maxtime=5)
 
-        f = SMCForecast.get_loss_function(Val{LocalLevelCountJump}(), low; size=10)
+        f = SMCForecast.get_loss_function(Val{LocalLevelCountStockout}(), low; size=10)
 
         DecisionTreeRegressor = @load DecisionTreeRegressor pkg=DecisionTree
         model = DecisionTreeRegressor(max_depth=4, min_samples_leaf=10)
@@ -24,7 +24,7 @@
 
         leaves = SMCForecast.get_leaves(mach.fitresult[1])
 
-        g = SMCForecast.get_loss_function(Val{LocalLevelCountJumpExplanatoryML}(), exogenous, low, mach; regularization=0.0, size=10)
+        g = SMCForecast.get_loss_function(Val{LocalLevelCountStockoutExplanatoryML}(), exogenous, low, mach; regularization=0.0, size=10)
 
         f1= f([ fcs.level1, 
             fcs.level2, 
@@ -55,9 +55,9 @@
         
         exogenous = [mod1(j, 12) == i for i in 2:12, j in 1:length(low)] * 1.0
 
-        fcs2 = SMCForecast.fit(Val{LocalLevelCountJumpExplanatoryML}(), exogenous, low[1:1000]; regularization=0.01, maxtime=60)
+        fcs2 = SMCForecast.fit(Val{LocalLevelCountStockoutExplanatoryML}(), exogenous, low[1:1000]; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJumpExplanatoryML}(fcs2, 1000)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockoutExplanatoryML}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, low[1:1000])
         println(loglikelihood)
 
