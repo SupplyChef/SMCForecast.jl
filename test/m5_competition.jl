@@ -28,16 +28,16 @@
 
         v = historical_values[time_series][1:end-28, :]
         t = historical_values[time_series][end-28:end, :]
-        #f = forecast(Val{LocalLevelCountJump}(), 
+        #f = forecast(Val{LocalLevelCountStockout}(), 
         #            v.value * 1.0, 
         #            nrow(t); 
         #            forecast_percentiles=[0.025, 0.5, 0.975], size=20, maxtime=30)
 
         f = []
         forecast_percentiles=[0.025, 0.5, 0.975]
-        fcs = SMCForecast.fit(Val{LocalLevelCountJump}(), v.value * 1.0; maxtime=130, size=300)
+        fcs = SMCForecast.fit(Val{LocalLevelCountStockout}(), v.value * 1.0; maxtime=130, size=300)
         println(fcs)
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs, 10)
+        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(fcs, 10)
         filtered_states, likelihood = SMCForecast.filter!(smc, v.value * 1.0; record=false)
         obs, weights = SMCForecast.predict_observations(smc, nrow(t))
         println("obs: $obs")
@@ -85,8 +85,8 @@
 
 #     model = JSON3.read(s)
                 
-#     fcs = LocalLevelCountJump(model[:level1], model[:level2], reshape(collect(model[:level_matrix]), (2,2)), model[:level_variance], model[:observation_variance])
-#     smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountJump}(fcs, 500)
+#     fcs = LocalLevelCountStockout(model[:level1], model[:level2], reshape(collect(model[:level_matrix]), (2,2)), model[:level_variance], model[:observation_variance])
+#     smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(fcs, 500)
 
 #     rng = Random.default_rng()
 #     states, weights = predict_states(smc, horizon; happy_only=true, rng=rng)
