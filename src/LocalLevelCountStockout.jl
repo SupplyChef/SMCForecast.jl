@@ -259,6 +259,9 @@ function zigp_pmf(k::Int, lambda::Float64, theta::Float64, pi::Float64)
 end
 
 function sample_zigp(lambda::Float64, theta::Float64, pi::Float64; rng=Random.default_rng())
+    if lambda <= 0
+        return 0
+    end
     u = rand(rng)
 
     k = 0
