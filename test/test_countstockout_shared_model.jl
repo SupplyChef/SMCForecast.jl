@@ -88,14 +88,19 @@ end
     end
 
     @test begin
-        rng = MersenneTwister(42)
-        base_draws = [SMCForecast.sample_observation(base, state1_instock; rng=rng) for _ in 1:20_000]
+        # sample_observation's in-stock branch draws via sample_zigp, which -- in the
+        # original code for all three variants alike, preserved as-is here -- doesn't
+        # actually consume the `rng` keyword passed to sample_observation; it always
+        # draws from the global default RNG. So reproducibility here comes from
+        # reseeding that global RNG (Random.seed!), not from passing a local `rng`.
+        Random.seed!(42)
+        base_draws = [SMCForecast.sample_observation(base, state1_instock) for _ in 1:20_000]
 
-        rng = MersenneTwister(42)
-        explanatory_draws = [SMCForecast.sample_observation(explanatory, state1_instock; rng=rng) for _ in 1:20_000]
+        Random.seed!(42)
+        explanatory_draws = [SMCForecast.sample_observation(explanatory, state1_instock) for _ in 1:20_000]
 
-        rng = MersenneTwister(42)
-        ml_draws = [SMCForecast.sample_observation(ml, state1_instock; rng=rng) for _ in 1:20_000]
+        Random.seed!(42)
+        ml_draws = [SMCForecast.sample_observation(ml, state1_instock) for _ in 1:20_000]
 
         # sample_observation doesn't consult the adjustment at all (it only ever reads
         # state[2], which is already in observed scale), so with the same rng seed the
