@@ -1,3 +1,4 @@
 /.vscode
 /alloc-profile.pb.gz
 /profile.pb.gz
+/Manifest.toml
