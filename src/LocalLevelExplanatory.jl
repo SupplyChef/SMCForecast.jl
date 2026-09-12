@@ -1,4 +1,4 @@
-struct LocalLevelExplanatory <: SMCSystem{SizedVector{2, Float64}}
+struct LocalLevelExplanatory <: SMCSystem{MVector{2, Float64}}
     exogenous::Matrix{Float64}
 
     intercept::Float64
@@ -49,7 +49,7 @@ function get_loss_function(::Val{LocalLevelExplanatory}, exogenous, values; regu
                               xs[3:(2 + size(exogenous, 1))],
                               abs(xs[2 + size(exogenous, 1) + 1]),
                               abs(xs[2 + size(exogenous, 1) + 2]))
-        smc = SMC{SizedVector{2, Float64}, LocalLevelExplanatory}(fcs2, 30)
+        smc = SMC{MVector{2, Float64}, LocalLevelExplanatory}(fcs2, 30)
         filtered_states, likelihood = SMCForecast.filter!(smc, values)
         return -likelihood + regularization * sum(x^2 for x in xs)
     end
@@ -64,7 +64,7 @@ if length(x) == 0 return 0.0 end
     return v
 end
 
-function de_exogenous_additive(state::SizedVector, exogenous::Matrix{Float64}, intercept::Float64, coefficients::Vector{Float64})::Float64
+function de_exogenous_additive(state::MVector, exogenous::Matrix{Float64}, intercept::Float64, coefficients::Vector{Float64})::Float64
     time = Int(state[1])
     value = state[2]
     if time == 0
@@ -81,13 +81,13 @@ function re_exogenous_additive(value, time, exogenous, intercept, coefficients):
 end
 
 function sample_initial_state(system::LocalLevelExplanatory, count; rng=Random.default_rng())
-    states = [SizedVector{2, Float64}(0, r) for r in rand(rng, system.prior_distribution(), count)]
+    states = [MVector{2, Float64}(0, r) for r in rand(rng, system.prior_distribution(), count)]
     #println(states)
     return states
 end
 
 function sample_states(system::LocalLevelExplanatory, 
-                       current_states::Vector{SizedVector{2, Float64}}, 
+                       current_states::Vector{MVector{2, Float64}}, 
                        next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; rng=Random.default_rng())
     time = Int(current_states[1][1])
@@ -103,7 +103,7 @@ function sample_states(system::LocalLevelExplanatory,
     sampling_probabilities .= 1
 end
 
-function transition_probability(system::LocalLevelExplanatory, state::SizedVector{2}, observation, new_state::SizedVector{2})::Float64
+function transition_probability(system::LocalLevelExplanatory, state::MVector{2}, observation, new_state::MVector{2})::Float64
     time = state[1]
     value = state[2]
 
@@ -112,14 +112,14 @@ function transition_probability(system::LocalLevelExplanatory, state::SizedVecto
                                  de_exogenous_additive(new_state, system.exogenous, system.intercept, system.coefficients))
 end
 
-function sample_observation(system::LocalLevelExplanatory, current_state::SizedVector{2}; rng=Random.default_rng())
+function sample_observation(system::LocalLevelExplanatory, current_state::MVector{2}; rng=Random.default_rng())
     time = Int(current_state[1])
     value = current_state[2]
     
     return rand(rng, Normal(value, sqrt(system.observation_variance)))
 end
 
-function observation_probability(system::LocalLevelExplanatory, state::SizedVector{2}, observation)::Float64
+function observation_probability(system::LocalLevelExplanatory, state::MVector{2}, observation)::Float64
     time = Int(state[1])
     value = state[2]
 
@@ -130,5 +130,5 @@ function observation_probability(system::LocalLevelExplanatory, state::SizedVect
 end
 
 function average_state(system::LocalLevelExplanatory, states, weights)
-    return SizedVector{2}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights))])
+    return MVector{2}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights))])
 end

@@ -26,10 +26,10 @@ using TestItemRunner
     using StaticArrays
         
     @test begin
-        system = System{SizedVector{1}}(x -> Normal(x, 1),
+        system = System{MVector{1}}(x -> Normal(x, 1),
                                         x -> Normal(x, 1),
                                         Uniform(0, 1))
-        smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
+        smc = SMC{MVector{1}, System{MVector{1}}}(system, 10)
 
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -46,10 +46,10 @@ using TestItemRunner
     end
 
     @test begin
-        system = System{SizedVector{1}}(x -> Normal(x, 1),
+        system = System{MVector{1}}(x -> Normal(x, 1),
                                         x -> Normal(x, 1),
                                         Uniform(0, 1))
-        smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
+        smc = SMC{MVector{1}, System{MVector{1}}}(system, 10)
 
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -73,10 +73,10 @@ end
     using StaticArrays
 
     @test begin
-        system = System{SizedVector{1}}(x -> Normal(x, 1),
+        system = System{MVector{1}}(x -> Normal(x, 1),
                                         x -> Normal(x, 1),
                                         Uniform(0, 1))
-        smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
+        smc = SMC{MVector{1}, System{MVector{1}}}(system, 10)
 
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations)
@@ -85,10 +85,10 @@ end
     end
 
     @test begin
-        system = System{SizedVector{1}}(x -> Normal(x, 1),
+        system = System{MVector{1}}(x -> Normal(x, 1),
                                         x -> Normal(x, 1),
                                         Uniform(0, 1))
-        smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
+        smc = SMC{MVector{1}, System{MVector{1}}}(system, 10)
 
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations; record=false)
@@ -105,10 +105,10 @@ end
     using Statistics
 
     @test begin
-        system = System{SizedVector{1}}(x -> Normal(x, 1),
+        system = System{MVector{1}}(x -> Normal(x, 1),
                                         x -> Normal(x, 1),
                                         Uniform(0, 1))
-        smc = SMC{SizedVector{1}, System{SizedVector{1}}}(system, 10)
+        smc = SMC{MVector{1}, System{MVector{1}}}(system, 10)
 
         observations = [0 + 0.1 * i for i in 1:200]
         filtered_states, likelihood = SMCForecast.filter!(smc, observations)
@@ -140,7 +140,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
+        smc = SMC{MVector{2, Float64}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -158,7 +158,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
+        smc = SMC{MVector{2, Float64}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)
@@ -176,7 +176,7 @@ end
 
     @test begin
         system = LocalLevel(100, 10, 30)
-        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(system, 10)
+        smc = SMC{MVector{2, Float64}, LocalLevel}(system, 10)
         
         rng=Random.default_rng()
         Random.seed!(rng, 1)

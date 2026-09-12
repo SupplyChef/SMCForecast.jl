@@ -67,7 +67,7 @@ include("Metrics.jl")
 include("Order.jl")
 include("Predict.jl")
 
-function rand(system::System{SizedVector{1}}, count::Integer)
+function rand(system::System{MVector{1}}, count::Integer)
     ys = zeros(count)
     x = rand(system.prior_distribution)
     #ys[1] = rand(system.observation_distribution(x))
