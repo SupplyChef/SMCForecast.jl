@@ -19,6 +19,11 @@ export ForecastSystem
 export LocalLevel
 export LocalLevelChange
 export LocalLevelExplanatory
+export LocalLevelCountStockoutModel
+export MeanAdjustment
+export IdentityAdjustment
+export LinearAdjustment
+export TreeAdjustment
 export LocalLevelCountStockout
 export LocalLevelCountStockoutExplanatory
 export LocalLevelCountStockoutExplanatoryML
@@ -53,6 +58,7 @@ include("SMC.jl")
 include("LocalLevel.jl")
 include("LocalLevelChange.jl")
 include("LocalLevelExplanatory.jl")
+include("CountStockoutCore.jl")
 include("LocalLevelCountStockout.jl")
 include("LocalLevelCountStockoutExplanatory.jl")
 include("LocalLevelCountStockoutExplanatoryML.jl")
