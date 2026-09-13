@@ -93,7 +93,7 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
 
         smc.weights .= smc.weights ./ weight_sum .* length(smc.weights)
 
-        resampled = multinomial_resample!(smc; rng=rng)
+        resampled = resample!(smc; rng=rng)
 
         normalized_weights .= smc.weights ./ length(smc.weights)
         push!(filtered_states, average_state(smc.system, smc.states, normalized_weights))
@@ -113,17 +113,42 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
     return filtered_states, sum(log.(observation_likelihood) .- 1 * log(length(smc.states)))
 end
 
-function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}} 
+"""
+    resample!(smc)
+
+Systematic resampling: a single shared uniform draw spreads `n` evenly-spaced
+sample points across the cumulative weight range, then one monotonic O(n)
+pass over the weights assigns each point its ancestor. This replaces the
+previous StatsBase-based multinomial resampling (n independent weighted
+draws, with StatsBase building its own sampling structures on every call);
+systematic resampling needs a single `rand` call and no extra allocations,
+and is also lower-variance than multinomial resampling for the same n.
+"""
+function resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}}
     #effective_size = 1 / sum(weight^2 for weight in smc.weights)
     effective_size = length(smc.weights)^2 / sum(weight^2 for weight in smc.weights)
 
     if effective_size < length(smc.states) / 4
         # avoid memory allocations by re-using the vectors that have not been resampled
-        states = 1:length(smc.states)
-        samples = Array{Int64}(undef, length(smc.states))
-        sampled = zeros(Int64, length(smc.states))
-        
-        StatsBase.sample!(rng, 1:length(states), pweights(smc.weights), samples)
+        n = length(smc.states)
+        states = 1:n
+        samples = Array{Int64}(undef, n)
+        sampled = zeros(Int64, n)
+
+        total_weight = sum(smc.weights)
+        step = total_weight / n
+        u = rand(rng) * step
+        cum_weight = smc.weights[1]
+        j = 1
+        for i in 1:n
+            target = u + (i - 1) * step
+            while cum_weight < target && j < n
+                j += 1
+                cum_weight += smc.weights[j]
+            end
+            samples[i] = j
+        end
+
         for sample in samples
             sampled[sample] = sampled[sample] + 1
         end
