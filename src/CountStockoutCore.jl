@@ -404,7 +404,7 @@ function observation_probability(system::LocalLevelCountStockoutModel, current_s
 end
 
 function average_state(system::LocalLevelCountStockoutModel, states, weights)
-    return MVector{3, Float64}([states[1][1],
+    return MVector{3, Float64}(states[1][1],
                            sum(states[i][2] * weights[i] for i in eachindex(weights)),
-                           sum(states[i][3] * weights[i] for i in eachindex(weights))])
+                           sum(states[i][3] * weights[i] for i in eachindex(weights)))
 end

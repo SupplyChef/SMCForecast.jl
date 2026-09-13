@@ -13,8 +13,8 @@ mutable struct SMC{T <: MVector, U <: SMCSystem{T}}
     historical_weights::Array{Array{Float64, 1}, 1}
 
     function SMC{T, U}(system::U, count::Int64) where U <: SMCSystem{T} where T <: MVector
-        smc = new{T, U}(system, 
-                        T[T(zeros(size(T, 1))) for i in 1:count], 
+        smc = new{T, U}(system,
+                        T[zero(T) for i in 1:count],
                         zeros(Float64, count),
                         Array{T, 1}[], 
                         Array{Float64, 1}[])
@@ -52,12 +52,13 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
     historical_states = Array{T, 1}[]
     historical_weights = Array{Float64, 1}[]
 
-    filtered_states = []
+    filtered_states = T[]
     observation_likelihood = zeros(length(observations))
-    
-    new_states = T[T(zeros(size(T, 1))) for i in 1:length(smc.states)]
+
+    new_states = T[zero(T) for i in 1:length(smc.states)]
     sampling_probabilities = [1.0 for i in 1:length(smc.states)]
     observation_probabilities = [1.0 for i in 1:length(smc.states)]
+    normalized_weights = zeros(Float64, length(smc.states))
     for (j, observation) in enumerate(observations)
         weight_sum::Float64 = 0.0
 
@@ -94,11 +95,12 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
 
         resampled = multinomial_resample!(smc; rng=rng)
 
-        push!(filtered_states, average_state(smc.system, smc.states, smc.weights ./ length(smc.weights)))
-    
+        normalized_weights .= smc.weights ./ length(smc.weights)
+        push!(filtered_states, average_state(smc.system, smc.states, normalized_weights))
+
         if record
-            push!(historical_states, [copyto!(T(zeros(size(T, 1))), state) for state in smc.states])
-            push!(historical_weights, deepcopy(smc.weights))
+            push!(historical_states, copy.(smc.states))
+            push!(historical_weights, copy(smc.weights))
         end
     end
 
@@ -126,7 +128,7 @@ function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {
             sampled[sample] = sampled[sample] + 1
         end
 
-        frees = Deque{Int64}()
+        frees = Int64[]
         for state in states
             if sampled[state] == 0
                 push!(frees, state)
@@ -154,11 +156,11 @@ function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T
         throw(ErrorException("The filter! method must be called first with record parameter set to true."))
     end
 
-    all_smoothed_states = []
+    all_smoothed_states = Vector{T}[]
     weights = zeros(Float64, length(smc.historical_weights[1]))
     transition_probabilities = zeros(Float64, length(smc.historical_weights[1]))
     for c in 1:count
-        smoothed_states = []
+        smoothed_states = T[]
         
         smoothed_state = StatsBase.sample(rng, smc.historical_states[end], pweights(smc.historical_weights[end]))
         push!(smoothed_states, smoothed_state)

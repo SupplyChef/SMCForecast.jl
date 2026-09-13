@@ -106,5 +106,5 @@ function average_state(system::LocalLevel, states, weights)
     for i in eachindex(weights)
         average_level += states[i][2] * weights[i]
     end
-    return MVector{2, Float64}([states[1][1], average_level])
+    return MVector{2, Float64}(states[1][1], average_level)
 end
