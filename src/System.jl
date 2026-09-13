@@ -41,5 +41,5 @@ function observation_probability(system::System{MVector{1}}, state::MVector{1}, 
 end
 
 function average_state(system::System{MVector{1}}, states, weights)
-    return MVector{1}([sum(states[i][1] * weights[i] for i in eachindex(weights))])
+    return MVector{1}(sum(states[i][1] * weights[i] for i in eachindex(weights)))
 end

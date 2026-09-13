@@ -130,5 +130,5 @@ function observation_probability(system::LocalLevelExplanatory, state::MVector{2
 end
 
 function average_state(system::LocalLevelExplanatory, states, weights)
-    return MVector{2}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights))])
+    return MVector{2}(states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)))
 end

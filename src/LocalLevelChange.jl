@@ -110,5 +110,5 @@ function observation_probability(system::LocalLevelChange, state::MVector{3, Flo
 end
 
 function average_state(system::LocalLevelChange, states, weights)
-    return MVector{3, Float64}([states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights))])
+    return MVector{3, Float64}(states[1][1], sum(states[i][2] * weights[i] for i in eachindex(weights)), sum(states[i][3] * weights[i] for i in eachindex(weights)))
 end
