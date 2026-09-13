@@ -21,7 +21,7 @@ end
 
 function forecast(::Val{LocalLevelCountStockoutExplanatory}, exogenous, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
     fcs = fit(Val{LocalLevelCountStockoutExplanatory}(), exogenous, values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64}, LocalLevelCountStockoutExplanatory}(fcs, 1_000)
+    smc = SMC{MVector{3, Float64}, LocalLevelCountStockoutExplanatory}(fcs, 1_000)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -84,7 +84,7 @@ function get_loss_function(::Val{LocalLevelCountStockoutExplanatory}, exogenous,
                                                             1-xs[7] xs[7]],
                                                 coefficients=xs[8:(7 + Base.size(exogenous, 1))]
                               )
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockoutExplanatory}(fcs2, size)
+        smc = SMC{MVector{3, Float64}, LocalLevelCountStockoutExplanatory}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
         return -likelihood + regularization * sum(x^2 for x in xs[8:end])

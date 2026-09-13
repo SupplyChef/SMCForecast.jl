@@ -15,7 +15,7 @@
 
         fcs2 = SMCForecast.fit(Val{LocalLevelCountStockoutExplanatory}(), exogenous, low; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockoutExplanatory}(fcs2, 1000)
+        smc = SMC{MVector{3, Float64}, LocalLevelCountStockoutExplanatory}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, low)
         println(loglikelihood)
 

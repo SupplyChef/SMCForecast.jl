@@ -1,4 +1,4 @@
-abstract type SMCSystem{T <: SizedVector} end
+abstract type SMCSystem{T <: MVector} end
 
 struct System{T} <: SMCSystem{T}
     transition_distribution
@@ -6,8 +6,8 @@ struct System{T} <: SMCSystem{T}
     prior_distribution
 end
 
-function sample_states(system::System{SizedVector{1}}, 
-                       current_states::Vector{SizedVector{1}}, 
+function sample_states(system::System{MVector{1}}, 
+                       current_states::Vector{MVector{1}}, 
                        next_observation::Union{Missing, Float64}, 
                        new_states, sampling_probabilities; rng=Random.default_rng())
 
@@ -20,7 +20,7 @@ function sample_states(system::System{SizedVector{1}},
     end
 end
 
-function sample_observation(system::System{SizedVector{1}}, current_state::SizedVector{1}; rng=Random.default_rng())
+function sample_observation(system::System{MVector{1}}, current_state::MVector{1}; rng=Random.default_rng())
     return rand(rng, system.observation_distribution(current_state[1]))
 end
 
@@ -28,18 +28,18 @@ function transition_probability(system, state, observation, new_state)
     throw(ErrorException("Invalid"))
 end
 
-function sample_initial_state(system::System{SizedVector{1}}, count; rng=Random.default_rng())
-    return SizedVector{1}.(rand(rng, system.prior_distribution, count))
+function sample_initial_state(system::System{MVector{1}}, count; rng=Random.default_rng())
+    return MVector{1}.(rand(rng, system.prior_distribution, count))
 end
 
-function transition_probability(system::System{SizedVector{1}}, state::SizedVector{1}, observation, new_state::SizedVector{1}) 
+function transition_probability(system::System{MVector{1}}, state::MVector{1}, observation, new_state::MVector{1}) 
     return pdf(system.transition_distribution(state[1]), new_state[1])
 end
 
-function observation_probability(system::System{SizedVector{1}}, state::SizedVector{1}, observation) 
+function observation_probability(system::System{MVector{1}}, state::MVector{1}, observation) 
     return pdf(system.observation_distribution(state[1]), observation)
 end
 
-function average_state(system::System{SizedVector{1}}, states, weights)
-    return SizedVector{1}([sum(states[i][1] * weights[i] for i in eachindex(weights))])
+function average_state(system::System{MVector{1}}, states, weights)
+    return MVector{1}([sum(states[i][1] * weights[i] for i in eachindex(weights))])
 end

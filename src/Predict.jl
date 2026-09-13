@@ -22,7 +22,7 @@ function expectile(obs, weights, q)
     end
 end
 
-function cum_expectiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
+function cum_expectiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: MVector
     values = cumsum([map(s -> s[2], states[i]) for i in 1:length(states)])
     return [expectile(values[i], weights[i], percentile) for i in 1:length(values)]
 end
@@ -32,11 +32,11 @@ function cum_expectiles(percentile::Real, obs::Array{Array{R, 1}, 1}, weights) w
     return [expectile(obs[i], weights[i], percentile) for i in 1:length(obs)]
 end
 
-function avg(states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
+function avg(states::Array{Array{S, 1}, 1}, weights) where S <: MVector
     return [sum(map(s -> s[2], states[i]) .* weights[i]) for i in 1:length(states)]
 end
 
-function percentiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
+function percentiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: MVector
     return [quantile(map(s -> s[2], states[i]), pweights(weights[i]), percentile) for i in 1:length(states)]
 end
 
@@ -48,7 +48,7 @@ function percentiles(percentile::Real, obs::Array{Array{R, 1}, 1}, weights) wher
     return [quantile(obs[i], pweights(weights[i]), percentile) for i in 1:length(obs)]
 end
 
-function cum_percentiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: SizedVector
+function cum_percentiles(percentile::Real, states::Array{Array{S, 1}, 1}, weights) where S <: MVector
     values = cumsum([map(s -> s[2], states[i]) for i in 1:length(states)])
     return [quantile(values[i], pweights(weights[i]), percentile) for i in 1:length(values)]
 end
@@ -58,7 +58,7 @@ function cum_percentiles(percentile::Real, obs::Array{Array{R, 1}, 1}, weights) 
     return [quantile(obs[i], pweights(weights[i]), percentile) for i in 1:length(obs)]
 end
 
-function predict_observations(smc::SMC{T, U}, horizon; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}}
+function predict_observations(smc::SMC{T, U}, horizon; happy_only=true, rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}}
     states, weights = predict_states(smc, horizon; happy_only=happy_only, rng=rng)
     #println("state mean: $(avg(states, weights))")
     #println("state median: $(percentiles(0.5, states, weights))")
@@ -68,7 +68,7 @@ function predict_observations(smc::SMC{T, U}, horizon; happy_only=true, rng=Rand
     return observations, weights
 end
 
-function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: LocalLevelCountStockout} 
+function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: MVector, U <: LocalLevelCountStockout} 
     states = Array{T, 1}[]
     weights = Array{Float64, 1}[]
 
@@ -106,7 +106,7 @@ function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Ran
     return states, weights
 end
 
-function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
+function predict_states(smc::SMC{T, U}, horizon::Int64; happy_only=true, rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}} 
     states = Array{T, 1}[]
     weights = Array{Float64, 1}[]
 

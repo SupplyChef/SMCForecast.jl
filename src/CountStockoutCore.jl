@@ -100,27 +100,26 @@ function binomial_coefficient(n::Float64, k::Int64)::Float64
     return binomial_coefficient
 end
 
+# Compute the log of the PMF of the Generalized Poisson Distribution at k >= 1.
+# `log_lambda` (== log(lambda)) and `log_k_factorial` (== logfactorial(k)) are
+# supplied by the caller so that a scan over successive k values (as in
+# sample_zigp's rejection-sampling loop) can carry them forward incrementally
+# instead of recomputing log(lambda) and the factorial from scratch each time.
+function log_generalized_poisson_pmf(k::Int, lambda::Float64, theta::Float64, log_lambda::Float64, log_k_factorial::Float64)::Float64
+    if k == 1
+        return log_lambda - (lambda + theta)
+    else
+        v = lambda + k * theta
+        return log_lambda + (k - 1) * log(v) - v - log_k_factorial
+    end
+end
+
 # Compute the log of the PMF of the Generalized Poisson Distribution
 function log_generalized_poisson_pmf(k::Int, lambda::Float64, theta::Float64)::Float64
     if k == 0
         return -lambda
-    elseif k == 1
-        log_lambda = log(lambda)
-        log_term3 = -(lambda + theta)
-
-        log_pmf = log_lambda + log_term3
-        return log_pmf
-    else
-        log_lambda = log(lambda)
-        log_term2 = (k - 1) * log(lambda + k * theta)
-        log_term3 = -(lambda + k * theta)
-
-        #TODO: precompute the factorial
-        log_k_factorial = logfactorial(k)
-
-        log_pmf = log_lambda + log_term2 + log_term3 - log_k_factorial
-        return log_pmf
     end
+    return log_generalized_poisson_pmf(k, lambda, theta, log(lambda), logfactorial(k))
 end
 
 # Compute the PMF of the Zero-Inflated Generalized Poisson Distribution
@@ -143,13 +142,28 @@ function sample_zigp(lambda::Float64, theta::Float64, pi::Float64; rng=Random.de
     end
     u = rand(rng)
 
-    k = 0
-    cum_pmf = zigp_pmf(k, lambda, theta, pi)
-    while cum_pmf <= u && k <= max(1000, 3*lambda)
-        k = k+1
-        cum_pmf += zigp_pmf(k, lambda, theta, pi)
+    one_minus_pi = 1 - pi
+    cum_pmf = pi + one_minus_pi * exp(-lambda)
+    if cum_pmf > u
+        return 0
     end
-    return k
+
+    log_lambda = log(lambda)
+    kmax = max(1000, 3 * lambda)
+
+    k = 1
+    log_k_factorial = 0.0 # logfactorial(1) == 0
+    while true
+        log_pmf = log_generalized_poisson_pmf(k, lambda, theta, log_lambda, log_k_factorial)
+        cum_pmf += one_minus_pi * exp(log_pmf)
+
+        if cum_pmf > u || k > kmax
+            return k
+        end
+
+        k += 1
+        log_k_factorial += log(k)
+    end
 end
 
 # --------------------------------------------------------------------------
@@ -236,7 +250,7 @@ initial value): they are not modeled as arbitrary knobs, just as the minimal
 surface needed to keep each variant's existing behavior identical after
 sharing this implementation.
 """
-struct LocalLevelCountStockoutModel{A<:MeanAdjustment} <: SMCSystem{SizedVector{3, Float64, Vector{Float64}}}
+struct LocalLevelCountStockoutModel{A<:MeanAdjustment} <: SMCSystem{MVector{3, Float64}}
     adjustment::A
 
     level1::Float64
@@ -292,7 +306,7 @@ struct LocalLevelCountStockoutModel{A<:MeanAdjustment} <: SMCSystem{SizedVector{
     end
 end
 
-function sample_initial_state(system::LocalLevelCountStockoutModel, count; rng=Random.default_rng())::Array{SizedVector{3, Float64, Vector{Float64}}, 1}
+function sample_initial_state(system::LocalLevelCountStockoutModel, count; rng=Random.default_rng())::Array{MVector{3, Float64}, 1}
     initial_value = system.level1
     if system.adjust_initial_value
         row = exogenous_row(system.adjustment, 1)
@@ -300,11 +314,11 @@ function sample_initial_state(system::LocalLevelCountStockoutModel, count; rng=R
     end
 
     states = sample(rng, [1, 2], system.initial_state_weights, count)
-    return [SizedVector{3, Float64, Vector{Float64}}(1.0, initial_value, states[i]) for i in eachindex(states)]
+    return [MVector{3, Float64}(1.0, initial_value, states[i]) for i in eachindex(states)]
 end
 
 function sample_states(system::LocalLevelCountStockoutModel,
-                       current_states::Vector{SizedVector{3, Float64, Vector{Float64}}},
+                       current_states::Vector{MVector{3, Float64}},
                        next_observation::Union{Missing, Float64},
                        new_states, sampling_probabilities; happy_only=false, rng=Random.default_rng())
     time = Int(current_states[1][1])
@@ -340,7 +354,7 @@ function sample_states(system::LocalLevelCountStockoutModel,
     end
 end
 
-function sample_observation(system::LocalLevelCountStockoutModel, current_state::SizedVector{3}; rng=Random.default_rng())
+function sample_observation(system::LocalLevelCountStockoutModel, current_state::MVector{3}; rng=Random.default_rng())
     value::Float64 = current_state[2]
     state = Int(current_state[3])
 
@@ -352,7 +366,7 @@ function sample_observation(system::LocalLevelCountStockoutModel, current_state:
     return sample_zigp(value, system.overdispersion, system.zero_inflation)
 end
 
-function transition_probability(system::LocalLevelCountStockoutModel, state1::SizedVector{3, Float64, Vector{Float64}}, new_observation, state2::SizedVector{3, Float64, Vector{Float64}})::Float64
+function transition_probability(system::LocalLevelCountStockoutModel, state1::MVector{3, Float64}, new_observation, state2::MVector{3, Float64})::Float64
     time = Int(state1[1])
     current_row = exogenous_row(system.adjustment, time)
     value = deadjust(system.adjustment, state1[2], current_row)
@@ -374,7 +388,7 @@ function transition_probability(system::LocalLevelCountStockoutModel, state1::Si
     return probability
 end
 
-function observation_probability(system::LocalLevelCountStockoutModel, current_state::SizedVector{3, Float64, Vector{Float64}}, current_observation)::Float64
+function observation_probability(system::LocalLevelCountStockoutModel, current_state::MVector{3, Float64}, current_observation)::Float64
     value = current_state[2]
     state = Int(current_state[3])
 
@@ -390,7 +404,7 @@ function observation_probability(system::LocalLevelCountStockoutModel, current_s
 end
 
 function average_state(system::LocalLevelCountStockoutModel, states, weights)
-    return SizedVector{3, Float64, Vector{Float64}}([states[1][1],
+    return MVector{3, Float64}([states[1][1],
                            sum(states[i][2] * weights[i] for i in eachindex(weights)),
                            sum(states[i][3] * weights[i] for i in eachindex(weights))])
 end

@@ -19,7 +19,7 @@ end
 
 function forecast(::Val{LocalLevelCountStockout}, values, horizon; maxtime=10.0, size=500, forecast_percentiles=0.5)
     fcs = fit(Val{LocalLevelCountStockout}(), values; maxtime=maxtime, size=size)
-    smc = SMC{SizedVector{3, Float64}, LocalLevelCountStockout}(fcs, 1_000)
+    smc = SMC{MVector{3, Float64}, LocalLevelCountStockout}(fcs, 1_000)
     filter!(smc, values; record=false)
     obs, weights = predict_observations(smc, horizon)
     if isa(forecast_percentiles, Real)
@@ -78,7 +78,7 @@ function get_loss_function(::Val{LocalLevelCountStockout}, values; regularizatio
                               level_matrix=[1-xs[6] xs[6];
                                             1-xs[7] xs[7]],
                               adjust_sampling=adjust_sampling)
-        smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(fcs2, size)
+        smc = SMC{MVector{3, Float64}, LocalLevelCountStockout}(fcs2, size)
         rng = MersenneTwister(1)
         filtered_states, likelihood = SMCForecast.filter!(smc, values; record=false, rng=rng)
 

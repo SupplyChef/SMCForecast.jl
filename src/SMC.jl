@@ -3,7 +3,7 @@ using Random
 """
 Particle filter
 """
-mutable struct SMC{T <: SizedVector, U <: SMCSystem{T}} 
+mutable struct SMC{T <: MVector, U <: SMCSystem{T}} 
     system::U
     
     states::Array{T, 1}
@@ -12,7 +12,7 @@ mutable struct SMC{T <: SizedVector, U <: SMCSystem{T}}
     historical_states::Array{Array{T, 1}, 1}
     historical_weights::Array{Array{Float64, 1}, 1}
 
-    function SMC{T, U}(system::U, count::Int64) where U <: SMCSystem{T} where T <: SizedVector
+    function SMC{T, U}(system::U, count::Int64) where U <: SMCSystem{T} where T <: MVector
         smc = new{T, U}(system, 
                         T[T(zeros(size(T, 1))) for i in 1:count], 
                         zeros(Float64, count),
@@ -23,32 +23,32 @@ mutable struct SMC{T <: SizedVector, U <: SMCSystem{T}}
 end
 
 """
-    initialize!(smc::SMC{T, U}) where {T <: SizedVector, U <: SMCSystem{T}} 
+    initialize!(smc::SMC{T, U}) where {T <: MVector, U <: SMCSystem{T}} 
 
 Initializes the particle filter.
 """
-function initialize!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
+function initialize!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}} 
     smc.states .= sample_initial_state(smc.system, length(smc.states); rng=rng)
     #smc.weights .= repeat([1.0 / length(smc.states)], length(smc.states))
     smc.weights .= repeat([1.0], length(smc.weights))
 end
 
 """
-    filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; record=true) where {T <: SizedVector, U <: SMCSystem{T}}
+    filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; record=true) where {T <: MVector, U <: SMCSystem{T}}
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
+function filter!(smc::SMC{T, U}, observations::Array{Float64, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: MVector, U <: SMCSystem{T}} 
     observations = convert(Array{Union{Float64, Missing}, 1}, observations)
     return filter!(smc, observations; rng=rng, record=record, trace=trace)
 end
 
 """
-    filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; record=true) where {T <: SizedVector, U <: SMCSystem{T}}
+    filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; record=true) where {T <: MVector, U <: SMCSystem{T}}
 
 Compute the filtered distribution.
 """
-function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: SizedVector, U <: SMCSystem{T}} 
+function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}; rng=Random.default_rng(), record=true, trace=nothing) where {T <: MVector, U <: SMCSystem{T}} 
     historical_states = Array{T, 1}[]
     historical_weights = Array{Float64, 1}[]
 
@@ -111,7 +111,7 @@ function filter!(smc::SMC{T, U}, observations::Array{Union{Float64, Missing}, 1}
     return filtered_states, sum(log.(observation_likelihood) .- 1 * log(length(smc.states)))
 end
 
-function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
+function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}} 
     #effective_size = 1 / sum(weight^2 for weight in smc.weights)
     effective_size = length(smc.weights)^2 / sum(weight^2 for weight in smc.weights)
 
@@ -149,7 +149,7 @@ function multinomial_resample!(smc::SMC{T, U}; rng=Random.default_rng()) where {
     end
 end
 
-function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T <: SizedVector, U <: SMCSystem{T}} 
+function smooth(smc::SMC{T, U}, count::Int64; rng=Random.default_rng()) where {T <: MVector, U <: SMCSystem{T}} 
     if isnothing(smc.historical_states) || isnothing(smc.historical_weights)
         throw(ErrorException("The filter! method must be called first with record parameter set to true."))
     end

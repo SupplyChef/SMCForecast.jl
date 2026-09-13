@@ -12,7 +12,7 @@
 
         fcs2 = SMCForecast.fit(Val{LocalLevelExplanatory}(), exogenous, drivers.british_drivers_KSI; regularization=0.01, maxtime=60)
 
-        smc = SMC{SizedVector{2, Float64}, LocalLevelExplanatory}(fcs2, 1000)
+        smc = SMC{MVector{2, Float64}, LocalLevelExplanatory}(fcs2, 1000)
         filtered_states, loglikelihood = SMCForecast.filter!(smc, drivers.british_drivers_KSI)
         println(loglikelihood)
 

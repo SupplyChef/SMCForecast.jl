@@ -11,7 +11,7 @@
 
         fcs2 = SMCForecast.fit(Val{LocalLevel}(), low * 1.0; maxtime=30, size=200)
 
-        smc = SMC{SizedVector{2, Float64, Vector{Float64}}, LocalLevel}(fcs2, 1000)
+        smc = SMC{MVector{2, Float64}, LocalLevel}(fcs2, 1000)
         filtered_states, loglikelihood2 = SMCForecast.filter!(smc, low * 1.0)
         println(loglikelihood2)
 

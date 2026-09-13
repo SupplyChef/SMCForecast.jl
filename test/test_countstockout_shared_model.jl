@@ -62,9 +62,9 @@ end
                                                level_variance=level_variance, zero_inflation=zero_inflation,
                                                overdispersion=overdispersion, adjust_sampling=false)
 
-    state1_instock = SizedVector{3, Float64, Vector{Float64}}(3.0, level1 + 1.2, 1.0)
-    state2_instock = SizedVector{3, Float64, Vector{Float64}}(4.0, level1 - 0.5, 1.0)
-    state1_outofstock = SizedVector{3, Float64, Vector{Float64}}(3.0, level2, 2.0)
+    state1_instock = MVector{3, Float64}(3.0, level1 + 1.2, 1.0)
+    state2_instock = MVector{3, Float64}(4.0, level1 - 0.5, 1.0)
+    state1_outofstock = MVector{3, Float64}(3.0, level2, 2.0)
 
     @test begin
         all(
@@ -150,7 +150,7 @@ end
                                           level_variance=0.02, zero_inflation=0.0, overdispersion=0.0, adjust_sampling=false)),
     ]
         @test begin
-            smc = SMC{SizedVector{3, Float64, Vector{Float64}}, typeof(system)}(system, 500)
+            smc = SMC{MVector{3, Float64}, typeof(system)}(system, 500)
             filter_rng = MersenneTwister(7)
             filtered_states, loglikelihood = SMCForecast.filter!(smc, values; rng=filter_rng)
 
@@ -220,7 +220,7 @@ end
     system = LocalLevelCountStockout(;level1=5.0, level2=0.05, level_matrix=[0.97 0.03; 0.3 0.7],
                                       level_variance=0.02, zero_inflation=0.0, overdispersion=0.0, adjust_sampling=false)
 
-    smc = SMC{SizedVector{3, Float64, Vector{Float64}}, LocalLevelCountStockout}(system, 2000)
+    smc = SMC{MVector{3, Float64}, LocalLevelCountStockout}(system, 2000)
 
     elapsed = @elapsed SMCForecast.filter!(smc, values; rng=MersenneTwister(11))
     println("filter! with 2000 particles over $n periods took $(elapsed)s")
