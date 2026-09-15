@@ -48,7 +48,10 @@
     # a ~2x wall-time cut. Paying that compilation cost here, on cheap
     # throwaway data, keeps it out of the timings below.
     SMCForecast.fit_gradient(Val{LocalLevel}(), values[1:10]; particle_count=10, rng=MersenneTwister(0))
-    SMCForecast.fit(Val{LocalLevel}(), values[1:10]; maxtime=0.5, size=10)
+    # bboptimize2 converts MaxTime via Dates.Second(...), which requires a
+    # whole number of seconds -- a fractional value like 0.5 throws
+    # InexactError rather than just truncating.
+    SMCForecast.fit(Val{LocalLevel}(), values[1:10]; maxtime=1, size=10)
 
     t_grad = @elapsed begin
         fitted_grad, iterations_used = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, rng=MersenneTwister(1))
