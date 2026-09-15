@@ -41,6 +41,15 @@
     # Monte Carlo approximation error relative to the exact Kalman value.
     slack = 20.0
 
+    # Both methods' first call in a fresh Julia process pays one-time JIT
+    # compilation on top of actual runtime, and that fixed cost doesn't
+    # shrink with iteration count -- it dominated an earlier comparison
+    # badly enough to make L-BFGS's ~18x iteration-count cut look like only
+    # a ~2x wall-time cut. Paying that compilation cost here, on cheap
+    # throwaway data, keeps it out of the timings below.
+    SMCForecast.fit_gradient(Val{LocalLevel}(), values[1:10]; particle_count=10, rng=MersenneTwister(0))
+    SMCForecast.fit(Val{LocalLevel}(), values[1:10]; maxtime=0.5, size=10)
+
     t_grad = @elapsed begin
         fitted_grad, iterations_used = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, rng=MersenneTwister(1))
     end
@@ -65,12 +74,11 @@
     # arbitrary constants, so a strict comparison between the two wall
     # times is not a real invariant. The likelihood checks above are the
     # actual accuracy comparison; this is just a sanity ceiling against a
-    # genuine hang. fit_gradient runs n_restarts=4 independent L-BFGS
-    # optimizations (see its docstring -- a single start could converge to
-    # a degenerate level_variance≈0 local optimum), so the ceiling allows
-    # for several times one run's worst-case time; L-BFGS should need far
-    # fewer iterations than the plain gradient descent this replaced, so
-    # 60s remains a loose sanity check rather than a tight bound.
+    # genuine hang. fit_gradient now runs a 3x3 grid of independent L-BFGS
+    # restarts (see its docstring -- a single start, or restarts that only
+    # vary the initial variance guess, reliably converge to a real but
+    # mediocre local optimum), so the ceiling allows for several times one
+    # run's worst-case time.
     @test t_grad < 60.0
 end
 

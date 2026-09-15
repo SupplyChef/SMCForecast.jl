@@ -236,42 +236,47 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, n_restarts=4, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
 get_loss_function_gradient) instead of bboptimize2's derivative-free
 search, optimizing with L-BFGS (see lbfgs) rather than plain gradient
 descent. Returns (fitted LocalLevel, iterations_used) -- the iteration
-count is exposed because one L-BFGS iteration and one bboptimize2
-function evaluation aren't the same unit of work, so wall-clock time and
-iteration count both matter for comparing the two.
+count from whichever restart won is exposed because one L-BFGS iteration
+and one bboptimize2 function evaluation aren't the same unit of work, so
+wall-clock time and iteration count both matter for comparing the two.
 
 Unlike bboptimize2, which explores many candidates at once via its
 population, a single L-BFGS run has no global search of its own -- it
 just follows the local (curvature-corrected) gradient from wherever it
-starts. With only one, poorly-scaled starting guess this can still
-converge to a degenerate stationary point (observed in practice with
-plain gradient descent: level_variance collapsing to ~1e-19 while
-observation_variance absorbs all the noise, since a near-zero process
-variance is a real local optimum of this likelihood, just usually a bad
-one -- L-BFGS's better-informed steps don't make that local optimum
-disappear). `n_restarts` runs L-BFGS from several initial variance
-guesses spread over a few orders of magnitude and keeps the best (lowest
-loss) result, which is the standard, simple fix for single-start local
-search on a non-convex objective.
+starts, and converges to whichever stationary point is reachable from
+there, good or bad. This is restarted from a small grid of initial
+guesses to compensate, but the grid has to actually cover the same
+ground bboptimize2's population does to help: an earlier version of this
+function only varied the initial *variance* guess across restarts,
+always starting `level` at `values[1]` -- every restart shared the same
+basin of attraction in the level direction, and L-BFGS reliably
+converged to a real but mediocre local optimum (level_variance collapsing
+towards 0, observation_variance absorbing the noise instead) that
+bboptimize2's search over the full `(minimum(values), maximum(values))`
+level range does not get stuck in. Restarting over a level x variance-scale
+grid (spanning the same level range bboptimize2 searches) is what
+actually lets L-BFGS reach a comparable optimum, not the choice of
+optimizer -- L-BFGS was already finding that same mediocre point in far
+fewer iterations than plain gradient descent, just as reliably.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, n_restarts=4, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, rng=rng)
 
+    level_guesses = (minimum(values), sum(values) / length(values), maximum(values))
     base_variance_guess = var(values) / length(values)
-    level0 = values[1]
+    scale_guesses = (0.1, 1.0, 10.0)
 
     best_φ = nothing
     best_f = Inf
     best_iterations = 0
-    for k in 1:n_restarts
-        scale = 10.0^(k - (n_restarts + 1) / 2)
+    for level0 in level_guesses, scale in scale_guesses
         φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
         φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter)
