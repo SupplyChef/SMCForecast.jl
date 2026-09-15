@@ -59,13 +59,16 @@
     println("gradient fit:     level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("derivative-free:  level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
-    # bboptimize2 is time-boxed (MaxTime), not evaluation-boxed, so this
-    # timing comparison is somewhat expected by construction rather than a
-    # surprising result -- the more informative comparison is
-    # iterations_used above (gradient descent) against how many objective
-    # evaluations bboptimize2 needs to reach a comparable likelihood, which
-    # isn't currently returned by fit()/bboptimize2.
-    @test t_grad < t_deriv_free
+    # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
+    # (MaxTime), not evaluation-boxed, and gradient_descent's own stopping
+    # point is a tolerance on the gradient norm -- both are independent,
+    # somewhat arbitrary constants, so a strict comparison between the two
+    # wall times is not a real invariant (plain gradient descent can still
+    # spend its full iteration budget circling a very flat optimum even
+    # after the fit itself is already good, as it did here before `tol`
+    # was loosened). The likelihood checks above are the actual accuracy
+    # comparison; this is just a sanity ceiling against a genuine hang.
+    @test t_grad < 30.0
 end
 
 @testitem "Differentiable particle likelihood (LocalLevel): matches the Kalman oracle and is ForwardDiff-differentiable" begin

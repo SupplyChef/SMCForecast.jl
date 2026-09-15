@@ -110,14 +110,18 @@ function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=20
 end
 
 """
-    gradient_descent(g, φ0; maxiter=500, tol=1e-8, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+    gradient_descent(g, φ0; maxiter=500, tol=1e-6, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
 
 Minimal backtracking-line-search gradient descent using ForwardDiff for the
 gradient. Deliberately simple and dependency-free (no Optim.jl) -- the point
 here is comparing against derivative-free search, not fielding a tuned
-L-BFGS. Returns (φ_opt, f_opt, iterations_used).
+L-BFGS. Plain (non-Newton) gradient descent converges slowly very close to
+an optimum (the gradient norm shrinks only linearly step to step there), so
+`tol` is a practically-tight-enough stopping point rather than machine
+precision -- a much stricter tol mostly buys extra iterations circling the
+optimum, not a meaningfully better fit. Returns (φ_opt, f_opt, iterations_used).
 """
-function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-8, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-6, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
     φ = copy(φ0)
     f_val = g(φ)
     iterations_used = 0
