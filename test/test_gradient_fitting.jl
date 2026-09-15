@@ -14,11 +14,13 @@
     true_observation_variance = 25.0
     T = 150
 
-    values = zeros(T)
-    x = true_level
-    for t in 1:T
-        x += sqrt(true_level_variance) * randn(rng)
-        values[t] = x + sqrt(true_observation_variance) * randn(rng)
+    values = let x = true_level
+        vals = zeros(T)
+        for t in 1:T
+            x += sqrt(true_level_variance) * randn(rng)
+            vals[t] = x + sqrt(true_observation_variance) * randn(rng)
+        end
+        vals
     end
 
     # LocalLevel is an exact linear-Gaussian state space model, so this is
@@ -78,11 +80,13 @@ end
     true_observation_variance = 8.0
     T = 80
 
-    values = zeros(T)
-    x = true_level
-    for t in 1:T
-        x += sqrt(true_level_variance) * randn(rng)
-        values[t] = x + sqrt(true_observation_variance) * randn(rng)
+    values = let x = true_level
+        vals = zeros(T)
+        for t in 1:T
+            x += sqrt(true_level_variance) * randn(rng)
+            vals[t] = x + sqrt(true_observation_variance) * randn(rng)
+        end
+        vals
     end
 
     kalman_ll = SMCForecast.kalman_loglikelihood(true_level, true_level_variance, true_observation_variance, values)

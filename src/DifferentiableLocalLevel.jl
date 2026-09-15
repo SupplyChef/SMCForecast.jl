@@ -58,7 +58,7 @@ end
 """
     differentiable_particle_loglikelihood(θ, values, standard_normals)
 
-θ = [level, level_variance, observation_variance]. `standard_normals` is an
+`θ` is `[level, level_variance, observation_variance]`. `standard_normals` is an
 (n_particles x length(values)) matrix of fixed N(0,1) draws -- fixing them,
 rather than drawing fresh ones inside this function, is what makes the
 result a smooth function of θ (the reparameterization trick) so ForwardDiff
@@ -93,8 +93,8 @@ end
     get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, rng=Random.default_rng())
 
 Gradient-friendly counterpart to get_loss_function(::Val{LocalLevel}, ...):
-returns `φ -> -loglik` where φ = [level, log(level_variance),
-log(observation_variance)] (fitting in log-space keeps the variances
+returns `φ -> -loglik` where `φ` is `[level, log(level_variance),
+log(observation_variance)]` (fitting in log-space keeps the variances
 positive without box constraints in the optimizer). Draws the particles'
 standard normals once and closes over them, so repeated calls to the
 returned function -- as an optimizer makes -- evaluate a fixed,
