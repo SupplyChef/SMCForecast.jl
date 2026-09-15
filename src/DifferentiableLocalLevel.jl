@@ -166,7 +166,7 @@ function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-6,
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, n_restarts=4, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
@@ -175,15 +175,40 @@ search. Returns (fitted LocalLevel, iterations_used) -- the iteration count
 is exposed because one gradient-descent iteration and one bboptimize2
 function evaluation aren't the same unit of work, so wall-clock time and
 iteration count both matter for comparing the two.
+
+Unlike bboptimize2, which explores many candidates at once via its
+population, a single gradient descent run has no global search of its
+own -- it just follows the local gradient from wherever it starts. With
+only one, poorly-scaled starting guess this can converge to a degenerate
+stationary point (observed in practice: level_variance collapsing to
+~1e-19 while observation_variance absorbs all the noise, since a
+near-zero process variance is a real local optimum of this likelihood,
+just usually a bad one). `n_restarts` runs gradient descent from several
+initial variance guesses spread over a few orders of magnitude and keeps
+the best (lowest loss) result, which is the standard, simple fix for
+single-start local search on a non-convex objective.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, n_restarts=4, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, rng=rng)
 
-    initial_variance_guess = var(values) / length(values)
-    φ0 = [values[1], log(initial_variance_guess), log(initial_variance_guess)]
+    base_variance_guess = var(values) / length(values)
+    level0 = values[1]
 
-    φ_opt, _, iterations_used = gradient_descent(loss, φ0; maxiter=maxiter)
+    best_φ = nothing
+    best_f = Inf
+    best_iterations = 0
+    for k in 1:n_restarts
+        scale = 10.0^(k - (n_restarts + 1) / 2)
+        φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
-    level, level_variance, observation_variance = φ_opt[1], exp(φ_opt[2]), exp(φ_opt[3])
-    return LocalLevel(level, level_variance, observation_variance), iterations_used
+        φ_opt, f_opt, iterations_used = gradient_descent(loss, φ0; maxiter=maxiter)
+        if f_opt < best_f
+            best_f = f_opt
+            best_φ = φ_opt
+            best_iterations = iterations_used
+        end
+    end
+
+    level, level_variance, observation_variance = best_φ[1], exp(best_φ[2]), exp(best_φ[3])
+    return LocalLevel(level, level_variance, observation_variance), best_iterations
 end

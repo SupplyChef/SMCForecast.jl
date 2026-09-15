@@ -68,7 +68,11 @@
     # after the fit itself is already good, as it did here before `tol`
     # was loosened). The likelihood checks above are the actual accuracy
     # comparison; this is just a sanity ceiling against a genuine hang.
-    @test t_grad < 30.0
+    # fit_gradient now runs n_restarts=4 independent gradient descents
+    # (see its docstring -- a single start could converge to a degenerate
+    # level_variance≈0 local optimum), so the ceiling allows for roughly
+    # 4x a single run's worst-case time.
+    @test t_grad < 60.0
 end
 
 @testitem "Differentiable particle likelihood (LocalLevel): matches the Kalman oracle and is ForwardDiff-differentiable" begin
