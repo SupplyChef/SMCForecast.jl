@@ -110,85 +110,158 @@ function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=20
 end
 
 """
-    gradient_descent(g, φ0; maxiter=500, tol=1e-6, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+    lbfgs_direction(grad, s_history, y_history, rho_history)
 
-Minimal backtracking-line-search gradient descent using ForwardDiff for the
-gradient. Deliberately simple and dependency-free (no Optim.jl) -- the point
-here is comparing against derivative-free search, not fielding a tuned
-L-BFGS. Plain (non-Newton) gradient descent converges slowly very close to
-an optimum (the gradient norm shrinks only linearly step to step there), so
-`tol` is a practically-tight-enough stopping point rather than machine
-precision -- a much stricter tol mostly buys extra iterations circling the
-optimum, not a meaningfully better fit. Returns (φ_opt, f_opt, iterations_used).
+The standard L-BFGS two-loop recursion (Nocedal & Wright, Algorithm 7.4):
+turns the current gradient and a short history of position/gradient
+differences into an approximate Newton descent direction, without ever
+forming the (d x d) Hessian approximation explicitly. Returns the search
+direction (already negated, i.e. a descent direction, not just -Hg).
 """
-function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-6, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+function lbfgs_direction(grad, s_history, y_history, rho_history)
+    q = copy(grad)
+    m = length(s_history)
+    alpha = zeros(eltype(grad), m)
+    for i in m:-1:1
+        alpha[i] = rho_history[i] * dot(s_history[i], q)
+        q .-= alpha[i] .* y_history[i]
+    end
+
+    gamma = m > 0 ? dot(s_history[m], y_history[m]) / dot(y_history[m], y_history[m]) : one(eltype(grad))
+    r = gamma .* q
+
+    for i in 1:m
+        beta = rho_history[i] * dot(y_history[i], r)
+        r .+= s_history[i] .* (alpha[i] - beta)
+    end
+
+    return -r
+end
+
+"""
+    lbfgs(g, φ0; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+
+Limited-memory BFGS with a backtracking (Armijo) line search, using
+ForwardDiff for gradients. Dependency-free (no Optim.jl) -- Optim's latest
+release moved autodiff selection to an ADTypes-based API that isn't
+verifiable to resolve compatibly across this repo's Julia 1.8/latest CI
+matrix without a local Julia environment (see fit_gradient's history for
+why that risk wasn't worth taking), so this reuses the same
+ForwardDiff + hand-rolled-line-search approach as the plain gradient
+descent it replaces, just with a curvature-aware search direction instead
+of steepest descent. Plain gradient descent needs far more iterations to
+converge close to an optimum (the gradient norm there shrinks only
+linearly step to step); L-BFGS approximates the inverse Hessian from the
+last `memory` (position, gradient) changes and gets superlinear
+convergence instead, which is the actual "a gradient is cheap, dimension
+doesn't matter" argument for preferring gradients over derivative-free
+search -- plain steepest descent doesn't realize that argument by itself.
+Returns (φ_opt, f_opt, iterations_used).
+"""
+function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
     φ = copy(φ0)
     f_val = g(φ)
-    iterations_used = 0
+    grad = ForwardDiff.gradient(g, φ)
 
+    s_history = typeof(φ)[]
+    y_history = typeof(φ)[]
+    rho_history = eltype(φ)[]
+
+    iterations_used = 0
     for iter in 1:maxiter
         iterations_used = iter
-        grad = ForwardDiff.gradient(g, φ)
+
         if !all(isfinite, grad)
             break
         end
-        grad_norm_sq = sum(abs2, grad)
-        if sqrt(grad_norm_sq) < tol
+        if sqrt(sum(abs2, grad)) < tol
             break
         end
 
+        direction = lbfgs_direction(grad, s_history, y_history, rho_history)
+        directional_derivative = dot(grad, direction)
+        # The two-loop recursion is only guaranteed to produce a descent
+        # direction when the accumulated curvature pairs keep the implicit
+        # Hessian approximation positive definite; numerically that can
+        # slip (or the history can be empty on iteration 1, giving
+        # direction = -grad, which is always fine). Fall back to steepest
+        # descent whenever it doesn't.
+        if !isfinite(directional_derivative) || directional_derivative >= 0
+            direction = -grad
+            directional_derivative = -sum(abs2, grad)
+        end
+
         step = initial_step
-        φ_candidate = φ .- step .* grad
+        φ_candidate = φ .+ step .* direction
         f_candidate = g(φ_candidate)
-        # `f_candidate > ...` is false whenever f_candidate is NaN (any IEEE 754
-        # comparison against NaN is false), so an overshoot that blows up the
-        # objective (e.g. exp(φ) overflowing) would otherwise read as "Armijo
-        # satisfied" and get accepted, permanently poisoning φ with NaN for
-        # every later iteration. Reject non-finite candidates explicitly.
-        while (!isfinite(f_candidate) || f_candidate > f_val - armijo_c * step * grad_norm_sq) && step > 1e-14
+        # The non-finite check is required, not optional: any IEEE 754
+        # comparison against NaN is false, so an overshot candidate that
+        # blows up the objective would otherwise read as "Armijo satisfied"
+        # and get accepted, poisoning every later iteration with NaN.
+        while (!isfinite(f_candidate) || f_candidate > f_val + armijo_c * step * directional_derivative) && step > 1e-14
             step *= backtrack_factor
-            φ_candidate = φ .- step .* grad
+            φ_candidate = φ .+ step .* direction
             f_candidate = g(φ_candidate)
         end
 
-        # Backtracking exhausted the step all the way to the floor without
-        # finding a finite, improving point: no further progress is possible
-        # along this direction, so stop rather than accept a broken step.
         if !isfinite(f_candidate)
             break
         end
 
+        grad_candidate = ForwardDiff.gradient(g, φ_candidate)
+        s = φ_candidate .- φ
+        y = grad_candidate .- grad
+        sy = dot(s, y)
+        # Skip the curvature update (rather than push a degenerate pair)
+        # when the curvature condition sy > 0 fails to hold with enough
+        # margin -- pushing it anyway can make later two-loop recursions
+        # produce an ascent direction.
+        if isfinite(sy) && sy > 1e-10
+            push!(s_history, s)
+            push!(y_history, y)
+            push!(rho_history, 1 / sy)
+            if length(s_history) > memory
+                popfirst!(s_history)
+                popfirst!(y_history)
+                popfirst!(rho_history)
+            end
+        end
+
         φ = φ_candidate
         f_val = f_candidate
+        grad = grad_candidate
     end
 
     return φ, f_val, iterations_used
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, n_restarts=4, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, n_restarts=4, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
 get_loss_function_gradient) instead of bboptimize2's derivative-free
-search. Returns (fitted LocalLevel, iterations_used) -- the iteration count
-is exposed because one gradient-descent iteration and one bboptimize2
+search, optimizing with L-BFGS (see lbfgs) rather than plain gradient
+descent. Returns (fitted LocalLevel, iterations_used) -- the iteration
+count is exposed because one L-BFGS iteration and one bboptimize2
 function evaluation aren't the same unit of work, so wall-clock time and
 iteration count both matter for comparing the two.
 
 Unlike bboptimize2, which explores many candidates at once via its
-population, a single gradient descent run has no global search of its
-own -- it just follows the local gradient from wherever it starts. With
-only one, poorly-scaled starting guess this can converge to a degenerate
-stationary point (observed in practice: level_variance collapsing to
-~1e-19 while observation_variance absorbs all the noise, since a
-near-zero process variance is a real local optimum of this likelihood,
-just usually a bad one). `n_restarts` runs gradient descent from several
-initial variance guesses spread over a few orders of magnitude and keeps
-the best (lowest loss) result, which is the standard, simple fix for
-single-start local search on a non-convex objective.
+population, a single L-BFGS run has no global search of its own -- it
+just follows the local (curvature-corrected) gradient from wherever it
+starts. With only one, poorly-scaled starting guess this can still
+converge to a degenerate stationary point (observed in practice with
+plain gradient descent: level_variance collapsing to ~1e-19 while
+observation_variance absorbs all the noise, since a near-zero process
+variance is a real local optimum of this likelihood, just usually a bad
+one -- L-BFGS's better-informed steps don't make that local optimum
+disappear). `n_restarts` runs L-BFGS from several initial variance
+guesses spread over a few orders of magnitude and keeps the best (lowest
+loss) result, which is the standard, simple fix for single-start local
+search on a non-convex objective.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500, n_restarts=4, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, n_restarts=4, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, rng=rng)
 
     base_variance_guess = var(values) / length(values)
@@ -201,7 +274,7 @@ function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=500
         scale = 10.0^(k - (n_restarts + 1) / 2)
         φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
-        φ_opt, f_opt, iterations_used = gradient_descent(loss, φ0; maxiter=maxiter)
+        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter)
         if f_opt < best_f
             best_f = f_opt
             best_φ = φ_opt

@@ -60,18 +60,17 @@
     println("derivative-free:  level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
-    # (MaxTime), not evaluation-boxed, and gradient_descent's own stopping
-    # point is a tolerance on the gradient norm -- both are independent,
-    # somewhat arbitrary constants, so a strict comparison between the two
-    # wall times is not a real invariant (plain gradient descent can still
-    # spend its full iteration budget circling a very flat optimum even
-    # after the fit itself is already good, as it did here before `tol`
-    # was loosened). The likelihood checks above are the actual accuracy
-    # comparison; this is just a sanity ceiling against a genuine hang.
-    # fit_gradient now runs n_restarts=4 independent gradient descents
-    # (see its docstring -- a single start could converge to a degenerate
-    # level_variance≈0 local optimum), so the ceiling allows for roughly
-    # 4x a single run's worst-case time.
+    # (MaxTime), not evaluation-boxed, and lbfgs's own stopping point is a
+    # tolerance on the gradient norm -- both are independent, somewhat
+    # arbitrary constants, so a strict comparison between the two wall
+    # times is not a real invariant. The likelihood checks above are the
+    # actual accuracy comparison; this is just a sanity ceiling against a
+    # genuine hang. fit_gradient runs n_restarts=4 independent L-BFGS
+    # optimizations (see its docstring -- a single start could converge to
+    # a degenerate level_variance≈0 local optimum), so the ceiling allows
+    # for several times one run's worst-case time; L-BFGS should need far
+    # fewer iterations than the plain gradient descent this replaced, so
+    # 60s remains a loose sanity check rather than a tight bound.
     @test t_grad < 60.0
 end
 
