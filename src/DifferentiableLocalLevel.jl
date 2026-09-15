@@ -125,6 +125,9 @@ function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-8,
     for iter in 1:maxiter
         iterations_used = iter
         grad = ForwardDiff.gradient(g, φ)
+        if !all(isfinite, grad)
+            break
+        end
         grad_norm_sq = sum(abs2, grad)
         if sqrt(grad_norm_sq) < tol
             break
@@ -133,10 +136,22 @@ function gradient_descent(g, φ0::AbstractVector{<:Real}; maxiter=500, tol=1e-8,
         step = initial_step
         φ_candidate = φ .- step .* grad
         f_candidate = g(φ_candidate)
-        while f_candidate > f_val - armijo_c * step * grad_norm_sq && step > 1e-14
+        # `f_candidate > ...` is false whenever f_candidate is NaN (any IEEE 754
+        # comparison against NaN is false), so an overshoot that blows up the
+        # objective (e.g. exp(φ) overflowing) would otherwise read as "Armijo
+        # satisfied" and get accepted, permanently poisoning φ with NaN for
+        # every later iteration. Reject non-finite candidates explicitly.
+        while (!isfinite(f_candidate) || f_candidate > f_val - armijo_c * step * grad_norm_sq) && step > 1e-14
             step *= backtrack_factor
             φ_candidate = φ .- step .* grad
             f_candidate = g(φ_candidate)
+        end
+
+        # Backtracking exhausted the step all the way to the floor without
+        # finding a finite, improving point: no further progress is possible
+        # along this direction, so stop rather than accept a broken step.
+        if !isfinite(f_candidate)
+            break
         end
 
         φ = φ_candidate
