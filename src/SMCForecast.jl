@@ -6,6 +6,7 @@ using DataStructures
 using Dates
 using Distributions
 import Distributions:rand
+using ForwardDiff
 using LinearAlgebra
 using MLJ
 using StatsBase
@@ -56,6 +57,7 @@ include("System.jl")
 include("SMC.jl")
 
 include("LocalLevel.jl")
+include("DifferentiableLocalLevel.jl")
 include("LocalLevelChange.jl")
 include("LocalLevelExplanatory.jl")
 include("CountStockoutCore.jl")
