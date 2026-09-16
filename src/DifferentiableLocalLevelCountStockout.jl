@@ -163,8 +163,26 @@ function differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, Î
     T = length(values)
 
     RT = promote_type(typeof(level1), typeof(level2), typeof(level_variance), typeof(zero_inflation), typeof(overdispersion), typeof(p12), typeof(p22))
-    value = fill(convert(RT, level1), n_particles)
-    value_buf = similar(value)
+    # Built via Vector{RT}(undef, n) + fill!/an explicit loop, not
+    # fill(...)/similar(...)/zeros(RT, ...): under ReverseDiff, those
+    # array-builder functions are specifically overloaded to return a
+    # ReverseDiff.TrackedArray (an efficient, single-shared-buffer
+    # representation of a *whole* tracked array) rather than a plain
+    # Vector{TrackedReal} (individually-tracked scalars in an ordinary
+    # Array) -- and TrackedArray, by ReverseDiff's own design, does not
+    # support setindex! at all ("TrackedArrays do not support setindex!",
+    # confirmed by CI when gradient_function=ReverseDiff.gradient hit this
+    # exact function). ForwardDiff has no such distinction (a Dual is
+    # always just a boxed scalar in an ordinary Array), which is why this
+    # never came up before ReverseDiff was tried. `Vector{RT}(undef, n)` is
+    # a plain Base constructor with no array-of-values semantics for
+    # ReverseDiff to intercept, so it stays a plain, mutable
+    # Vector{TrackedReal} under ReverseDiff while remaining exactly
+    # equivalent to the previous fill(...)/zeros(...) calls for every
+    # other caller (Float64, ForwardDiff.Dual).
+    value = Vector{RT}(undef, n_particles)
+    fill!(value, convert(RT, level1))
+    value_buf = Vector{RT}(undef, n_particles)
 
     # Per-particle belief over regime (P(in stock), P(stockout)), exactly
     # marginalized rather than sampled -- see the module-level note. The
@@ -176,12 +194,15 @@ function differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, Î
     for _ in 1:10
         b1_0, b2_0 = b1_0 * (1 - p12) + b2_0 * (1 - p22), b1_0 * p12 + b2_0 * p22
     end
-    belief1 = fill(b1_0, n_particles)
-    belief2 = fill(b2_0, n_particles)
-    belief1_buf = similar(belief1)
-    belief2_buf = similar(belief2)
+    belief1 = Vector{RT}(undef, n_particles)
+    fill!(belief1, b1_0)
+    belief2 = Vector{RT}(undef, n_particles)
+    fill!(belief2, b2_0)
+    belief1_buf = Vector{RT}(undef, n_particles)
+    belief2_buf = Vector{RT}(undef, n_particles)
 
-    log_weights = zeros(RT, n_particles)
+    log_weights = Vector{RT}(undef, n_particles)
+    fill!(log_weights, zero(RT))
     total_loglik = zero(RT)
     resample_count = 0
 
@@ -407,6 +428,26 @@ safe to bake in. The plain (uncompiled) form retraces on every call, so
 it always re-evaluates the real branch for the current theta -- it gives
 up the extra speed a compiled tape would have bought, but never the
 correctness compiled tapes can quietly cost here.
+
+A second, distinct incompatibility -- found via CI, not anticipated up
+front -- is that ReverseDiff represents "an array of tracked values" two
+ways: a `TrackedArray` (one shared value/derivative buffer per array,
+efficient, but immutable as a whole -- `setindex!` throws
+"TrackedArrays do not support setindex!") or a plain `Vector{TrackedReal}`
+(individually-tracked scalars in an ordinary `Array`, which *does* support
+`setindex!`). `differentiable_particle_loglikelihood`'s preallocated
+per-particle buffers (`value`, `belief1`, `belief2`, `log_weights`, ...)
+rely on exactly that mutability, and ReverseDiff overloads `fill(x, n)`/
+`similar(::TrackedArray)`/`zeros(RT, n)` to return the *immutable*
+`TrackedArray` form -- so those buffers must be built with the plain Base
+constructor `Vector{RT}(undef, n)` (not intercepted by ReverseDiff, since
+it carries no array-of-values semantics of its own) followed by an
+explicit `fill!`/loop, not `fill(...)`/`similar(...)`/`zeros(...)`.
+ForwardDiff has no such distinction -- a `Dual` is always just a boxed
+scalar in an ordinary `Array` -- which is why this never came up before
+ReverseDiff was tried, and is exactly the kind of implementation detail
+"investigate a new AD tool" means checking, not just a Julia-version
+compat bound.
 """
 function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200, maxiter=200, tol::Real=1e-6, resample_every::Int=0, max_backtracks::Int=20, rng=Random.default_rng(), gradient_function=ForwardDiff.gradient)
     loss = get_loss_function_gradient(Val{LocalLevelCountStockout}(), values; particle_count=particle_count, resample_every=resample_every, rng=rng)
