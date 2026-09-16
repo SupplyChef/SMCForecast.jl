@@ -415,7 +415,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal=:bootstrap, resample_every=0, resample_alpha=0.5, max_backtracks=20, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, tol=1e-6, proposal=:bootstrap, resample_every=0, resample_alpha=0.5, max_backtracks=20, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
@@ -434,6 +434,16 @@ explicitly requested. `proposal=:optimal` reduces importance weight
 degeneracy using LocalLevel's closed-form optimal proposal; independently,
 `resample_every > 0` reduces it via periodic differentiable resampling, a
 mechanism that isn't specific to linear-Gaussian models.
+
+`tol` and `max_backtracks` are passed through to `lbfgs`. With
+`resample_every > 0`, `tol`'s default (1e-6) can make every restart burn
+its full `maxiter` without ever terminating early: near one of
+resampling's discontinuities (see `differentiable_particle_loglikelihood`)
+the gradient norm can legitimately never settle below a tight tolerance,
+since the function isn't smooth there, so `lbfgs` keeps iterating for a
+convergence criterion the objective's own shape can't satisfy. A looser
+`tol` lets it stop once practically converged instead of paying for
+iterations that aren't buying more accuracy.
 
 Unlike bboptimize2, which explores many candidates at once via its
 population, a single L-BFGS run has no global search of its own -- it
@@ -454,7 +464,7 @@ actually lets L-BFGS reach a comparable optimum, not the choice of
 optimizer -- L-BFGS was already finding that same mediocre point in far
 fewer iterations than plain gradient descent, just as reliably.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, max_backtracks::Int=20, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, tol::Real=1e-6, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, max_backtracks::Int=20, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, proposal=proposal,
                                        resample_every=resample_every, resample_alpha=resample_alpha, rng=rng)
 
@@ -468,7 +478,7 @@ function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200
     for level0 in level_guesses, scale in scale_guesses
         φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
-        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter, max_backtracks=max_backtracks)
+        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter, tol=tol, max_backtracks=max_backtracks)
         if f_opt < best_f
             best_f = f_opt
             best_φ = φ_opt

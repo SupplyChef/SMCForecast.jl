@@ -104,17 +104,20 @@
     # selection is a hard threshold on a fixed offset against cumsum(q), so
     # as θ moves during optimization, crossing a threshold flips which
     # particle a given index inherits -- a genuine (if measure-zero in
-    # θ-space) discontinuity that a smooth line search doesn't expect. That
-    # was making Armijo backtracking bottom out repeatedly, each such
-    # iteration costing up to ~46 extra evaluations (lbfgs's line search
-    # backtracks until step <= 1e-14, roughly log2(1e14) halvings). lbfgs
-    # now takes max_backtracks (default 20) to bound that cost per
-    # iteration regardless of caller; capped harder here (10) since this is
-    # exactly the pathological case it exists for. This is a fix to the
-    # optimizer that benefits every configuration, not a workaround specific
-    # to resampling or to this one model.
+    # θ-space) discontinuity that a smooth line search doesn't expect. lbfgs
+    # now takes max_backtracks (default 20, 10 here) to bound the Armijo
+    # backtracking loop's cost regardless of caller -- a fix that benefits
+    # every configuration, not a workaround specific to resampling. But that
+    # alone only cut 57s to 48s: capping backtracks bounds the cost of *one*
+    # bad iteration, and the real driver turned out to be that every restart
+    # was burning its *entire* maxiter=100 without ever satisfying the
+    # default tol=1e-6 -- near a discontinuity the gradient norm can
+    # legitimately never settle that tight, since the function isn't smooth
+    # there, so lbfgs was iterating for a convergence criterion the
+    # objective's own shape can't satisfy. tol=1e-3 here lets it stop once
+    # practically converged instead.
     t_grad_resampled = @elapsed begin
-        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=100, max_backtracks=10, rng=MersenneTwister(1))
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=100, tol=1e-3, max_backtracks=10, rng=MersenneTwister(1))
     end
     @test fitted_grad_resampled.level_variance > 0
     @test fitted_grad_resampled.observation_variance > 0
@@ -130,7 +133,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=100, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
+    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=100, tol=1e-3, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
