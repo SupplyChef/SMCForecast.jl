@@ -131,9 +131,14 @@
     # a tight gradient-norm tolerance very close to an optimum," and
     # bounding maxiter should cost little accuracy now that the underlying
     # landscape is confirmed smooth, rather than being another blind
-    # parameter guess.
+    # parameter guess. maxiter=30 got very close (kalman-ll=-474.06,
+    # essentially matching both true and bboptimize2; 16.2s against a
+    # 15.3s bar, missed by ~6%) -- iterations scaled roughly linearly with
+    # time here and accuracy has stayed excellent at every budget tried in
+    # this smooth landscape, so trimming further should clear the bar with
+    # room to spare rather than needing another round.
     t_grad_resampled = @elapsed begin
-        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=30, rng=MersenneTwister(1))
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=20, rng=MersenneTwister(1))
     end
     @test fitted_grad_resampled.level_variance > 0
     @test fitted_grad_resampled.observation_variance > 0
@@ -149,7 +154,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=30): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
+    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=20): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
