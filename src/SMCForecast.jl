@@ -9,6 +9,7 @@ import Distributions:rand
 using ForwardDiff
 using LinearAlgebra
 using MLJ
+using ReverseDiff
 using StatsBase
 using StaticArrays
 using SpecialFunctions
@@ -59,9 +60,11 @@ include("SMC.jl")
 include("LocalLevel.jl")
 include("DifferentiableLocalLevel.jl")
 include("LocalLevelChange.jl")
+include("DifferentiableLocalLevelChange.jl")
 include("LocalLevelExplanatory.jl")
 include("CountStockoutCore.jl")
 include("LocalLevelCountStockout.jl")
+include("DifferentiableLocalLevelCountStockout.jl")
 include("LocalLevelCountStockoutExplanatory.jl")
 include("LocalLevelCountStockoutExplanatoryML.jl")
 
