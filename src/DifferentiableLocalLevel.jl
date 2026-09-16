@@ -26,13 +26,13 @@
 #     resampling means this degrades for long series exactly the way
 #     un-resampled SIS always does (weight variance grows with T) -- it's
 #     a fitting-time surrogate for short-to-moderate series, not a
-#     filter!-with-gradients replacement. It supports two proposals: the
-#     bootstrap proposal (samples x_t ignoring y_t, so weight variance
-#     grows quickly with T) and, since LocalLevel is linear-Gaussian, the
-#     locally optimal proposal (samples x_t from p(x_t | x_{t-1}, y_t),
-#     using the observation being weighted on) -- see its docstring for
-#     why that's still exact importance sampling and not a second
-#     resampling-shaped workaround.
+#     filter!-with-gradients replacement. It supports two orthogonal ways
+#     to fight that degeneracy without touching filter!/resample!: the
+#     locally optimal proposal (:optimal, exact only because LocalLevel is
+#     linear-Gaussian) and periodic differentiable soft resampling
+#     (resample_every > 0, model-agnostic -- the one of the two that would
+#     still apply to a model with a discrete state). See the function's
+#     docstring for both.
 # --------------------------------------------------------------------------
 
 """
@@ -62,7 +62,7 @@ function kalman_loglikelihood(level, level_variance, observation_variance, value
 end
 
 """
-    differentiable_particle_loglikelihood(θ, values, standard_normals; proposal=:bootstrap)
+    differentiable_particle_loglikelihood(θ, values, standard_normals; proposal=:bootstrap, resample_every=0, resampling_uniforms=nothing, resample_alpha=0.5)
 
 `θ` is `[level, level_variance, observation_variance]`. `standard_normals` is an
 (n_particles x length(values)) matrix of fixed N(0,1) draws -- fixing them,
@@ -95,10 +95,53 @@ exact importance sampling for any `θ` (unbiased regardless of how far `θ`
 is from the data-generating parameters, not just at the optimum), it just
 uses `values[t]` when proposing instead of only when weighting, so weight
 variance grows far more slowly with `T`. It requires no resampling and
-therefore raises none of resampling's differentiability problems -- it's a
-different fix for the same degeneracy, not a resampling workaround.
+therefore raises none of resampling's differentiability problems -- but it
+only exists because LocalLevel's transition and observation are both
+linear-Gaussian; a model with a discrete state (e.g. a stockout regime)
+has no such closed form.
+
+# Resampling
+
+`resample_every` (`0` by default, meaning "never") is a second, more
+broadly applicable answer to the same degeneracy problem, that doesn't
+depend on any of that: periodic *soft resampling* (Karkus, Hsu & Lee,
+2018). Every `resample_every` timesteps it mixes the current normalized
+weights `W` with a uniform distribution, `q = resample_alpha * W +
+(1 - resample_alpha) / n_particles`, and resamples ancestors from `q`
+(via systematic resampling) instead of from `W` directly. Two things make
+this differentiable end to end despite resampling being a hard categorical
+choice:
+
+  - *which* particle survives is decided by comparing `q`'s cumulative sum
+    against one pre-drawn offset per resampling event
+    (`resampling_uniforms`, the same fixed-randomness trick as
+    `standard_normals`) -- that choice itself carries no gradient (there's
+    no way around that for a genuinely discrete selection), but the
+    *value* carried forward by the surviving particle is a smooth function
+    of θ, so gradient information still flows through it;
+  - each survivor's weight is corrected by `W[ancestor] / q[ancestor]`
+    (importance-sampling correction for resampling from `q` instead of
+    `W`), which is a smooth, nonzero function of θ that keeps the whole
+    estimator both unbiased and differentiable, and which mixing in a
+    uniform floor keeps well-behaved (no particle's `q` is ever exactly 0,
+    so no correction ratio blows up).
+
+This works regardless of whether `proposal` is `:bootstrap` or `:optimal`,
+and regardless of whether the model's likelihood has any closed form at
+all, which is the point: it's the option that would still apply to a model
+`:optimal`-style proposals can't reach. `resample_every=0` performs no
+resampling and reproduces the exact same arithmetic (down to floating
+point) as before this option existed.
 """
-function differentiable_particle_loglikelihood(θ, values, standard_normals::AbstractMatrix; proposal::Symbol=:bootstrap)
+function differentiable_particle_loglikelihood(θ, values, standard_normals::AbstractMatrix;
+                                                proposal::Symbol=:bootstrap,
+                                                resample_every::Int=0,
+                                                resampling_uniforms::Union{Nothing,AbstractVector}=nothing,
+                                                resample_alpha::Real=0.5)
+    if proposal !== :bootstrap && proposal !== :optimal
+        throw(ArgumentError("proposal must be :bootstrap or :optimal, got $(repr(proposal))"))
+    end
+
     level, level_variance, observation_variance = θ[1], θ[2], θ[3]
     n_particles = size(standard_normals, 1)
     T = length(values)
@@ -106,56 +149,112 @@ function differentiable_particle_loglikelihood(θ, values, standard_normals::Abs
     RT = promote_type(typeof(level), typeof(level_variance), typeof(observation_variance))
     x = fill(convert(RT, level), n_particles)
     log_weights = zeros(RT, n_particles)
+    total_loglik = zero(RT)
+    resample_count = 0
 
-    if proposal === :bootstrap
-        level_sd = sqrt(level_variance)
-        log_norm_const = -0.5 * log(2 * pi * observation_variance)
-        for t in 1:T
+    level_sd = sqrt(level_variance)
+    log_norm_const_bootstrap = -0.5 * log(2 * pi * observation_variance)
+    marginal_variance = level_variance + observation_variance
+    post_variance = level_variance * observation_variance / marginal_variance
+    post_sd = sqrt(post_variance)
+    log_norm_const_optimal = -0.5 * log(2 * pi * marginal_variance)
+
+    for t in 1:T
+        y = values[t]
+        if proposal === :bootstrap
             @inbounds for i in 1:n_particles
                 x[i] = x[i] + level_sd * standard_normals[i, t]
-                log_weights[i] += log_norm_const - 0.5 * (values[t] - x[i])^2 / observation_variance
+                log_weights[i] += log_norm_const_bootstrap - 0.5 * (y - x[i])^2 / observation_variance
             end
-        end
-    elseif proposal === :optimal
-        marginal_variance = level_variance + observation_variance
-        post_variance = level_variance * observation_variance / marginal_variance
-        post_sd = sqrt(post_variance)
-        log_norm_const = -0.5 * log(2 * pi * marginal_variance)
-        for t in 1:T
-            y = values[t]
+        else # :optimal
             @inbounds for i in 1:n_particles
                 pred_mean = x[i]
-                log_weights[i] += log_norm_const - 0.5 * (y - pred_mean)^2 / marginal_variance
+                log_weights[i] += log_norm_const_optimal - 0.5 * (y - pred_mean)^2 / marginal_variance
                 post_mean = post_variance * (pred_mean / level_variance + y / observation_variance)
                 x[i] = post_mean + post_sd * standard_normals[i, t]
             end
         end
-    else
-        throw(ArgumentError("proposal must be :bootstrap or :optimal, got $(repr(proposal))"))
+
+        if resample_every > 0 && t < T && t % resample_every == 0
+            resample_count += 1
+            u0 = resampling_uniforms[resample_count]
+
+            m = maximum(log_weights)
+            w_unnorm = exp.(log_weights .- m)
+            w_sum = sum(w_unnorm)
+            # The marginal likelihood contribution of this block has to be
+            # banked now, before the particle set (and its weights) get
+            # replaced by resampling -- see the docstring's "Resampling"
+            # section for why the correction applied below makes the next
+            # block's own contribution pick up where this leaves off.
+            total_loglik += m + log(w_sum) - log(n_particles)
+
+            W = w_unnorm ./ w_sum
+            q = resample_alpha .* W .+ (1 - resample_alpha) / n_particles
+            ancestors = systematic_resample_indices(q, u0)
+
+            x = x[ancestors]
+            log_weights = log.(W[ancestors] ./ q[ancestors])
+        end
     end
 
     m = maximum(log_weights)
-    return m + log(sum(exp(lw - m) for lw in log_weights)) - log(n_particles)
+    total_loglik += m + log(sum(exp(lw - m) for lw in log_weights)) - log(n_particles)
+    return total_loglik
 end
 
 """
-    get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal=:bootstrap, rng=Random.default_rng())
+    systematic_resample_indices(q, u0)
+
+Systematic resampling: given a probability vector `q` (summing to 1) and a
+single fixed offset `u0 ~ Uniform(0,1)`, returns `length(q)` ancestor
+indices via one sorted sweep over `q`'s cumulative sum, rather than
+`length(q)` independent draws -- the standard low-variance resampling
+scheme (the same one `resample!` in SMC.jl uses; see its docstring),
+reimplemented here so it also works when `q` carries ForwardDiff Dual
+numbers. Index selection compares `cumsum(q)` against plain `Float64`
+positions, which only ever inspects `q`'s primal value -- exactly why the
+choice of *which* ancestor gets picked carries no gradient of its own; see
+`differentiable_particle_loglikelihood`'s docstring for why that's fine.
+"""
+function systematic_resample_indices(q::AbstractVector, u0::Real)
+    n = length(q)
+    cumq = cumsum(q)
+    ancestors = Vector{Int}(undef, n)
+    j = 1
+    for i in 1:n
+        position = (i - 1 + u0) / n
+        while j < n && cumq[j] < position
+            j += 1
+        end
+        ancestors[i] = j
+    end
+    return ancestors
+end
+
+"""
+    get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal=:bootstrap, resample_every=0, resample_alpha=0.5, rng=Random.default_rng())
 
 Gradient-friendly counterpart to get_loss_function(::Val{LocalLevel}, ...):
 returns `φ -> -loglik` where `φ` is `[level, log(level_variance),
 log(observation_variance)]` (fitting in log-space keeps the variances
 positive without box constraints in the optimizer). Draws the particles'
-standard normals once and closes over them, so repeated calls to the
-returned function -- as an optimizer makes -- evaluate a fixed,
-deterministic, differentiable surface rather than a fresh Monte Carlo draw
-each time. `proposal` is passed through to
+standard normals (and, if `resample_every > 0`, the resampling offsets)
+once and closes over them, so repeated calls to the returned function --
+as an optimizer makes -- evaluate a fixed, deterministic, differentiable
+surface rather than a fresh Monte Carlo draw each time. `proposal`,
+`resample_every` and `resample_alpha` are passed through to
 `differentiable_particle_loglikelihood` (see its docstring).
 """
-function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal::Symbol=:bootstrap, rng=Random.default_rng())
+function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, rng=Random.default_rng())
     standard_normals = randn(rng, particle_count, length(values))
+    n_resamples = resample_every > 0 ? count(t -> t % resample_every == 0, 1:(length(values) - 1)) : 0
+    resampling_uniforms = resample_every > 0 ? rand(rng, n_resamples) : nothing
     return φ -> begin
         level, level_variance, observation_variance = φ[1], exp(φ[2]), exp(φ[3])
-        -differentiable_particle_loglikelihood([level, level_variance, observation_variance], values, standard_normals; proposal=proposal)
+        -differentiable_particle_loglikelihood([level, level_variance, observation_variance], values, standard_normals;
+                                                proposal=proposal, resample_every=resample_every,
+                                                resampling_uniforms=resampling_uniforms, resample_alpha=resample_alpha)
     end
 end
 
@@ -297,11 +396,14 @@ count from whichever restart won is exposed because one L-BFGS iteration
 and one bboptimize2 function evaluation aren't the same unit of work, so
 wall-clock time and iteration count both matter for comparing the two.
 
-`proposal` defaults to `:bootstrap` to keep this function's behavior
-unchanged from earlier callers; pass `proposal=:optimal` to use the
-locally optimal (Kalman-update) proposal instead, which is expected to
-reduce importance weight degeneracy without needing more particles or any
-resampling -- see `differentiable_particle_loglikelihood`'s docstring.
+`proposal`, `resample_every` and `resample_alpha` are passed through to
+`get_loss_function_gradient`/`differentiable_particle_loglikelihood` (see
+their docstrings) and all default to their no-op values (`:bootstrap`,
+`0`) so this function's behavior is unchanged from earlier callers unless
+explicitly requested. `proposal=:optimal` reduces importance weight
+degeneracy using LocalLevel's closed-form optimal proposal; independently,
+`resample_every > 0` reduces it via periodic differentiable resampling, a
+mechanism that isn't specific to linear-Gaussian models.
 
 Unlike bboptimize2, which explores many candidates at once via its
 population, a single L-BFGS run has no global search of its own -- it
@@ -322,8 +424,9 @@ actually lets L-BFGS reach a comparable optimum, not the choice of
 optimizer -- L-BFGS was already finding that same mediocre point in far
 fewer iterations than plain gradient descent, just as reliably.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, rng=Random.default_rng())
-    loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, proposal=proposal, rng=rng)
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, rng=Random.default_rng())
+    loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, proposal=proposal,
+                                       resample_every=resample_every, resample_alpha=resample_alpha, rng=rng)
 
     level_guesses = (minimum(values), sum(values) / length(values), maximum(values))
     base_variance_guess = var(values) / length(values)

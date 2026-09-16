@@ -51,6 +51,7 @@
     # both get warmed up here.
     SMCForecast.fit_gradient(Val{LocalLevel}(), values[1:10]; particle_count=10, rng=MersenneTwister(0))
     SMCForecast.fit_gradient(Val{LocalLevel}(), values[1:10]; particle_count=10, proposal=:optimal, rng=MersenneTwister(0))
+    SMCForecast.fit_gradient(Val{LocalLevel}(), values[1:10]; particle_count=10, resample_every=5, rng=MersenneTwister(0))
     # bboptimize2 converts MaxTime via Dates.Second(...), which requires a
     # whole number of seconds -- a fractional value like 0.5 throws
     # InexactError rather than just truncating.
@@ -88,6 +89,21 @@
     @test fitted_grad_optimal.observation_variance > 0
     kalman_ll_grad_optimal = SMCForecast.kalman_loglikelihood(fitted_grad_optimal.level, fitted_grad_optimal.level_variance, fitted_grad_optimal.observation_variance, values)
 
+    # Second diagnostic/candidate fix: the plain bootstrap proposal (not
+    # the Gaussian-specific :optimal one) plus periodic differentiable
+    # resampling every 10 steps -- the mechanism that would still apply to
+    # a model whose likelihood has no closed-form optimal proposal. If
+    # this closes a meaningful part of the gap using the same particle
+    # count and (nearly) the same proposal as the original bootstrap run,
+    # that's evidence resampling itself -- not just this one model's
+    # Gaussian structure -- is what the fix needs to generalize.
+    t_grad_resampled = @elapsed begin
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=10, rng=MersenneTwister(1))
+    end
+    @test fitted_grad_resampled.level_variance > 0
+    @test fitted_grad_resampled.observation_variance > 0
+    kalman_ll_grad_resampled = SMCForecast.kalman_loglikelihood(fitted_grad_resampled.level, fitted_grad_resampled.level_variance, fitted_grad_resampled.observation_variance, values)
+
     t_deriv_free = @elapsed begin
         fitted_bb = SMCForecast.fit(Val{LocalLevel}(), values; maxtime=5.0, size=200)
     end
@@ -98,6 +114,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
+    println("gradient fit (bootstrap+resample every 10, N=300): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
@@ -114,6 +131,7 @@
     @test t_grad < 60.0
     @test t_grad_bigN < 120.0
     @test t_grad_optimal < 60.0
+    @test t_grad_resampled < 60.0
 end
 
 @testitem "Differentiable particle likelihood (LocalLevel): matches the Kalman oracle and is ForwardDiff-differentiable" begin
@@ -180,4 +198,34 @@ end
     particle_ll_optimal_small = SMCForecast.differentiable_particle_loglikelihood([true_level, true_level_variance, true_observation_variance], values, standard_normals_small; proposal=:optimal)
     println("kalman-ll=$kalman_ll, bootstrap (N=50)=$particle_ll_bootstrap_small, optimal (N=50)=$particle_ll_optimal_small")
     @test abs(particle_ll_optimal_small - kalman_ll) < abs(particle_ll_bootstrap_small - kalman_ll)
+
+    # resample_every=0 must reproduce the pre-existing no-resampling
+    # arithmetic exactly (regression check that adding the option didn't
+    # perturb default behavior) -- for both proposals, since resampling is
+    # now handled by the same shared loop for either.
+    @test SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals; resample_every=0) == particle_ll
+    @test SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals; proposal=:optimal, resample_every=0) == particle_ll_optimal
+
+    # Differentiable resampling (soft resampling, Karkus/Hsu/Lee 2018): a
+    # second, model-agnostic answer to the same weight-degeneracy problem
+    # that -- unlike proposal=:optimal -- doesn't depend on LocalLevel
+    # being linear-Gaussian. Tested here with the plain bootstrap proposal
+    # specifically, so any improvement it shows isn't riding on the
+    # Gaussian-specific fix above. At the same small particle count as the
+    # bootstrap-vs-optimal comparison, periodic resampling should bring the
+    # bootstrap proposal closer to the Kalman-exact value than no
+    # resampling does.
+    resample_every = 10
+    n_resamples = count(t -> t % resample_every == 0, 1:(T - 1))
+    resampling_uniforms = rand(MersenneTwister(123), n_resamples)
+
+    particle_ll_resampled_small = SMCForecast.differentiable_particle_loglikelihood([true_level, true_level_variance, true_observation_variance], values, standard_normals_small; resample_every=resample_every, resampling_uniforms=resampling_uniforms)
+    @test isfinite(particle_ll_resampled_small)
+
+    grad_resampled = ForwardDiff.gradient(θ -> SMCForecast.differentiable_particle_loglikelihood(θ, values, standard_normals_small; resample_every=resample_every, resampling_uniforms=resampling_uniforms), θ0)
+    @test all(isfinite, grad_resampled)
+    @test any(g -> abs(g) > 1e-6, grad_resampled)
+
+    println("kalman-ll=$kalman_ll, bootstrap (N=50, no resample)=$particle_ll_bootstrap_small, bootstrap (N=50, resampled every $resample_every)=$particle_ll_resampled_small")
+    @test abs(particle_ll_resampled_small - kalman_ll) < abs(particle_ll_bootstrap_small - kalman_ll)
 end
