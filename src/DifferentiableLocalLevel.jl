@@ -311,10 +311,10 @@ function lbfgs_direction(grad, s_history, y_history, rho_history)
 end
 
 """
-    lbfgs(g, φ0; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20)
+    lbfgs(g, φ0; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20, gradient_function=ForwardDiff.gradient)
 
 Limited-memory BFGS with a backtracking (Armijo) line search, using
-ForwardDiff for gradients. Dependency-free (no Optim.jl) -- Optim's latest
+ForwardDiff for gradients by default. Dependency-free (no Optim.jl) -- Optim's latest
 release moved autodiff selection to an ADTypes-based API that isn't
 verifiable to resolve compatibly across this repo's Julia 1.8/latest CI
 matrix without a local Julia environment (see fit_gradient's history for
@@ -355,12 +355,26 @@ evaluations of `g` (and its ForwardDiff gradient afterward), which is
 exactly what made an earlier resampling experiment take 516s. Capping it
 here bounds the worst case for every caller, resampling or not, rather
 than working around it only where it was first noticed.
+
+`gradient_function` takes `(g, φ)` and returns `∇g(φ)`, defaulting to
+`ForwardDiff.gradient` -- every existing caller (LocalLevel,
+LocalLevelChange) keeps using exactly that, unchanged. It exists so a
+caller whose loss has many parameters can swap in a reverse-mode AD tool
+instead: forward-mode's cost scales with the *number of parameters*
+(ForwardDiff differentiates by propagating one Dual partial derivative
+slot per parameter through every operation), while reverse-mode's cost is
+roughly a constant multiple of a single forward pass regardless of
+parameter count -- see DifferentiableLocalLevelCountStockout.jl's
+`fit_gradient` docstring for where this mattered enough to use (7
+parameters, a per-particle inner loop with real transcendental-function
+cost) and which reverse-mode tool was actually compatible with this
+repo's Julia 1.8 CI leg.
 """
-function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20)
+function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20, gradient_function=ForwardDiff.gradient)
     φ = copy(φ0)
     f_val = g(φ)
     n_feval = 1
-    grad = ForwardDiff.gradient(g, φ)
+    grad = gradient_function(g, φ)
     n_geval = 1
 
     s_history = typeof(φ)[]
@@ -412,7 +426,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
             break
         end
 
-        grad_candidate = ForwardDiff.gradient(g, φ_candidate)
+        grad_candidate = gradient_function(g, φ_candidate)
         n_geval += 1
         s = φ_candidate .- φ
         y = grad_candidate .- grad

@@ -376,8 +376,39 @@ not attempted here since it's a new, heavier dependency with its own
 Julia-1.8-compatibility risk (see `lbfgs`'s docstring for why Optim.jl
 itself was already ruled out for a related reason) that deserves
 validating deliberately rather than folding into this fix.
+
+# Reverse-mode AD (`gradient_function`)
+
+`gradient_function` (default `ForwardDiff.gradient`, unchanged from before)
+is passed straight through to `lbfgs`. Following up on the note above,
+`gradient_function=ReverseDiff.gradient` is a real, working alternative:
+of the three mainstream reverse-mode AD packages, `Zygote.jl` and
+`Enzyme.jl` both now require Julia >= 1.10 (checked directly against
+their latest tagged `Project.toml`s), which would break this repo's
+Julia 1.8 CI leg outright -- a much bigger decision than a gradient
+backend swap, not made here. `ReverseDiff.jl` still declares `julia =
+"1"` (compatible), though an open, unmerged PR against it would drop that
+to 1.10 too, so this is a live compatibility risk to watch, not a
+permanent guarantee.
+
+Only the *uncompiled* `ReverseDiff.gradient(f, x)` is safe to use here,
+never `ReverseDiff.compile(ReverseDiff.GradientTape(...))`: a compiled
+tape bakes in whichever branch was taken *at recording time* and silently
+gives wrong results if a later call takes a different branch for the same
+code. This function's own control flow depends on theta in more than one
+place -- `max(value[i] + level_sd*standard_normals[i,t], level2)` in
+`differentiable_particle_loglikelihood` (which side wins depends on
+`level2`/`level_variance`), and `systematic_resample_indices`'s ancestor
+search (which compares `cumsum(W)`, itself theta-dependent, against fixed
+positions) -- both of which can genuinely pick a different branch as an
+L-BFGS restart moves through parameter space, unlike `log_zigp_pmf`'s
+`k==0`/`k==1` branches, which only ever depend on the *data* `y` and are
+safe to bake in. The plain (uncompiled) form retraces on every call, so
+it always re-evaluates the real branch for the current theta -- it gives
+up the extra speed a compiled tape would have bought, but never the
+correctness compiled tapes can quietly cost here.
 """
-function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200, maxiter=200, tol::Real=1e-6, resample_every::Int=0, max_backtracks::Int=20, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200, maxiter=200, tol::Real=1e-6, resample_every::Int=0, max_backtracks::Int=20, rng=Random.default_rng(), gradient_function=ForwardDiff.gradient)
     loss = get_loss_function_gradient(Val{LocalLevelCountStockout}(), values; particle_count=particle_count, resample_every=resample_every, rng=rng)
 
     logit(p) = log(p / (1 - p))
@@ -400,7 +431,7 @@ function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200
         φ0 = [log(level1_0), log(level2_guess), log(base_variance_guess * scale),
               logit(zero_inflation_guess), logit(overdispersion_guess), logit(p12_guess), logit(p22_guess)]
 
-        φ_opt, f_opt, iterations_used, n_feval, n_geval = lbfgs(loss, φ0; maxiter=maxiter, tol=tol, max_backtracks=max_backtracks)
+        φ_opt, f_opt, iterations_used, n_feval, n_geval = lbfgs(loss, φ0; maxiter=maxiter, tol=tol, max_backtracks=max_backtracks, gradient_function=gradient_function)
         total_n_feval += n_feval
         total_n_geval += n_geval
         if f_opt < best_f

@@ -172,3 +172,106 @@ end
     println("reference (N=5000, no resample)=$reference_ll, small (N=50, no resample)=$particle_ll_small, small (N=50, resampled every $resample_every)=$particle_ll_resampled_small")
     @test abs(particle_ll_resampled_small - reference_ll) < abs(particle_ll_small - reference_ll)
 end
+
+@testitem "Reverse-mode AD (LocalLevelCountStockout): ReverseDiff matches ForwardDiff and is investigated for speed" begin
+    using SMCForecast
+    using Distributions
+    using Random
+    using StaticArrays
+    using Statistics
+    using ForwardDiff
+    using ReverseDiff
+
+    # ForwardDiff's cost scales with the *number of parameters* (one Dual
+    # partial-derivative slot per parameter, propagated through every
+    # operation), which is the single largest remaining structural cost
+    # identified in fit_gradient's "Performance" docstring section for this
+    # 7-parameter model. Reverse-mode AD doesn't have that scaling problem
+    # -- one backward pass computes the whole gradient in roughly a
+    # constant multiple of one forward pass, regardless of parameter count.
+    # Of the three mainstream reverse-mode tools, only ReverseDiff.jl is
+    # usable here without dropping this repo's Julia 1.8 CI leg: Zygote.jl
+    # and Enzyme.jl both now require Julia >= 1.10 (checked directly
+    # against their latest tagged Project.toml's julia compat bound), a
+    # much bigger decision than a gradient-backend swap. This testitem
+    # checks ReverseDiff.gradient (the *uncompiled* form -- see
+    # fit_gradient's docstring for why a compiled GradientTape is unsafe
+    # here, given theta-dependent branches in the level floor's max(...)
+    # and in resampling's ancestor search) actually agrees with
+    # ForwardDiff, then measures whether it's faster in practice.
+    true_system = LocalLevelCountStockout(; level1=40.0, level2=2.0, level_variance=9.0,
+                                           zero_inflation=0.1, overdispersion=0.15,
+                                           level_matrix=[0.95 0.05; 0.2 0.8])
+    T = 150
+    rng = MersenneTwister(20260916)
+    smc_gen = SMC{MVector{3, Float64}, LocalLevelCountStockout}(true_system, 1)
+    initialize!(smc_gen; rng=rng)
+    obs, _ = predict_observations(smc_gen, T; happy_only=false, rng=rng)
+    values = map(o -> Float64(round(o[1])), obs)
+
+    θ0 = [true_system.level1, true_system.level2, true_system.level_variance,
+          true_system.zero_inflation, true_system.overdispersion,
+          true_system.level_matrix[1, 2], true_system.level_matrix[2, 2]]
+    standard_normals = randn(MersenneTwister(99), 300, T)
+
+    f(θ) = SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ, values, standard_normals)
+
+    # Correctness parity, not just "both finite": if ReverseDiff's handling
+    # of the per-particle mutating arrays (value/belief1/belief2/log_weights)
+    # or of the theta-dependent max(...)/resampling branches silently broke
+    # something, the two gradients would disagree, likely substantially --
+    # this is a far more sensitive check than either gradient's own
+    # finite/nonzero tests above.
+    grad_forward = ForwardDiff.gradient(f, θ0)
+    grad_reverse = ReverseDiff.gradient(f, θ0)
+    @test all(isfinite, grad_reverse)
+    println("ForwardDiff grad=$grad_forward")
+    println("ReverseDiff grad=$grad_reverse")
+    # Element-wise, not just an aggregate norm check (a plain `≈` on the
+    # whole vector would pass even if one small-magnitude component were
+    # very wrong relative to itself, as long as the others dominate the
+    # norm) -- this is exactly the shape of bug that already bit p12/p22
+    # once in this file (an exactly-zero gradient component hiding behind
+    # otherwise-normal-looking optimizer behavior), so this check is
+    # deliberately per-component.
+    @test all(isapprox.(grad_reverse, grad_forward; rtol=1e-4, atol=1e-6))
+
+    # JIT warm-up for both backends on cheap throwaway data before timing
+    # either -- same rationale as the other testitem's warm-up calls.
+    SMCForecast.fit_gradient(Val{LocalLevelCountStockout}(), values[1:10]; particle_count=10, maxiter=2, rng=MersenneTwister(0))
+    SMCForecast.fit_gradient(Val{LocalLevelCountStockout}(), values[1:10]; particle_count=10, resample_every=5, maxiter=2, rng=MersenneTwister(0), gradient_function=ReverseDiff.gradient)
+
+    reference_loss = SMCForecast.get_loss_function(Val{LocalLevelCountStockout}(), values; size=3000)
+
+    t_forward = @elapsed begin
+        fitted_forward, iterations_forward, n_feval_forward, n_geval_forward = SMCForecast.fit_gradient(Val{LocalLevelCountStockout}(), values;
+                                                                                                          particle_count=300, resample_every=30, maxiter=50, rng=MersenneTwister(1))
+    end
+    t_reverse = @elapsed begin
+        fitted_reverse, iterations_reverse, n_feval_reverse, n_geval_reverse = SMCForecast.fit_gradient(Val{LocalLevelCountStockout}(), values;
+                                                                                                          particle_count=300, resample_every=30, maxiter=50, rng=MersenneTwister(1),
+                                                                                                          gradient_function=ReverseDiff.gradient)
+    end
+
+    forward_xs = [fitted_forward.level1, fitted_forward.level2, fitted_forward.level_variance,
+                  fitted_forward.zero_inflation, fitted_forward.overdispersion,
+                  fitted_forward.level_matrix[1, 2], fitted_forward.level_matrix[2, 2]]
+    reverse_xs = [fitted_reverse.level1, fitted_reverse.level2, fitted_reverse.level_variance,
+                  fitted_reverse.zero_inflation, fitted_reverse.overdispersion,
+                  fitted_reverse.level_matrix[1, 2], fitted_reverse.level_matrix[2, 2]]
+    forward_nll = reference_loss(forward_xs)
+    reverse_nll = reference_loss(reverse_xs)
+    @test isfinite(reverse_nll)
+
+    # Same rng seed and restart grid for both backends: since
+    # ForwardDiff.gradient and ReverseDiff.gradient are both exact (to
+    # floating-point precision) gradients of the *same* loss function,
+    # L-BFGS should take an essentially identical optimization path with
+    # either -- this is a same-accuracy check, not a same-speed one.
+    println("ForwardDiff fit: level1=$(fitted_forward.level1), level2=$(fitted_forward.level2), level_variance=$(fitted_forward.level_variance), zero_inflation=$(fitted_forward.zero_inflation), overdispersion=$(fitted_forward.overdispersion), p12=$(fitted_forward.level_matrix[1,2]), p22=$(fitted_forward.level_matrix[2,2]), reference-nll=$forward_nll, $(n_feval_forward) feval + $(n_geval_forward) geval, $(t_forward)s")
+    println("ReverseDiff fit: level1=$(fitted_reverse.level1), level2=$(fitted_reverse.level2), level_variance=$(fitted_reverse.level_variance), zero_inflation=$(fitted_reverse.zero_inflation), overdispersion=$(fitted_reverse.overdispersion), p12=$(fitted_reverse.level_matrix[1,2]), p22=$(fitted_reverse.level_matrix[2,2]), reference-nll=$reverse_nll, $(n_feval_reverse) feval + $(n_geval_reverse) geval, $(t_reverse)s")
+    println("speedup (t_forward / t_reverse) = $(t_forward / t_reverse)")
+
+    @test abs(reverse_nll - forward_nll) < 5.0
+    @test t_reverse < 120.0
+end

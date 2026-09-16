@@ -9,6 +9,7 @@ import Distributions:rand
 using ForwardDiff
 using LinearAlgebra
 using MLJ
+using ReverseDiff
 using StatsBase
 using StaticArrays
 using SpecialFunctions
