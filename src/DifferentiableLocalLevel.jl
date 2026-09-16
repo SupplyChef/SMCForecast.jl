@@ -157,6 +157,7 @@ function differentiable_particle_loglikelihood(θ, values, standard_normals::Abs
 
     RT = promote_type(typeof(level), typeof(level_variance), typeof(observation_variance))
     x = fill(convert(RT, level), n_particles)
+    x_buf = similar(x)
     log_weights = zeros(RT, n_particles)
     total_loglik = zero(RT)
     resample_count = 0
@@ -202,8 +203,21 @@ function differentiable_particle_loglikelihood(θ, values, standard_normals::Abs
             W = w_unnorm ./ w_sum
             ancestors = systematic_resample_indices(W, u0)
 
-            x = x[ancestors]
-            log_weights = zeros(RT, n_particles)
+            # Gather into the preallocated buffer and swap, rather than
+            # x = x[ancestors]: that allocates a fresh array every
+            # resampling event (5 per call here), and profiling this
+            # (via feval/geval counts against wall time -- see
+            # fit_gradient's docstring) showed each resampling event
+            # costing far more than a 300-element gather should, which
+            # points at allocation/GC pressure across the thousands of
+            # calls a 9-restart L-BFGS grid makes. fill! avoids the same
+            # problem for log_weights, which only ever needs to become
+            # all-zero here, not a new array.
+            @inbounds for i in 1:n_particles
+                x_buf[i] = x[ancestors[i]]
+            end
+            x, x_buf = x_buf, x
+            fill!(log_weights, zero(RT))
         end
     end
 
