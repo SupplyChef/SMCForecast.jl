@@ -26,7 +26,13 @@
 #     resampling means this degrades for long series exactly the way
 #     un-resampled SIS always does (weight variance grows with T) -- it's
 #     a fitting-time surrogate for short-to-moderate series, not a
-#     filter!-with-gradients replacement.
+#     filter!-with-gradients replacement. It supports two proposals: the
+#     bootstrap proposal (samples x_t ignoring y_t, so weight variance
+#     grows quickly with T) and, since LocalLevel is linear-Gaussian, the
+#     locally optimal proposal (samples x_t from p(x_t | x_{t-1}, y_t),
+#     using the observation being weighted on) -- see its docstring for
+#     why that's still exact importance sampling and not a second
+#     resampling-shaped workaround.
 # --------------------------------------------------------------------------
 
 """
@@ -56,33 +62,76 @@ function kalman_loglikelihood(level, level_variance, observation_variance, value
 end
 
 """
-    differentiable_particle_loglikelihood(θ, values, standard_normals)
+    differentiable_particle_loglikelihood(θ, values, standard_normals; proposal=:bootstrap)
 
 `θ` is `[level, level_variance, observation_variance]`. `standard_normals` is an
 (n_particles x length(values)) matrix of fixed N(0,1) draws -- fixing them,
 rather than drawing fresh ones inside this function, is what makes the
 result a smooth function of θ (the reparameterization trick) so ForwardDiff
 can differentiate through it. Implements sequential importance sampling
-with the bootstrap (transition) proposal and no resampling; see the
-module-level note above for what that does and doesn't make valid.
+with no resampling; see the module-level note above for what that does and
+doesn't make valid.
+
+`proposal=:bootstrap` samples each `x_t` from the transition density alone
+(`x_{t-1} + N(0, level_variance)`), ignoring `values[t]`, then weights by
+the observation density. That's the textbook bootstrap filter, but
+proposing without looking at the observation is exactly what makes its
+importance weights degenerate quickly as `T` grows -- most of the particles
+end up carrying negligible weight, so the effective number of particles
+actually informing the likelihood estimate can be far smaller than
+`n_particles`, and that shortfall doesn't average out by drawing more
+standard normals with the same proposal.
+
+`proposal=:optimal` instead uses the proposal that minimizes importance
+weight variance for a fixed observation, which is tractable here because
+LocalLevel is linear-Gaussian: it samples `x_t` from
+`p(x_t | x_{t-1}, values[t])` (a Gaussian combining the transition and
+observation precisions, i.e. one step of a Kalman update) and weights by
+`p(values[t] | x_{t-1}) = N(values[t]; x_{t-1}, level_variance +
+observation_variance)` -- the same one-step-ahead predictive density
+`kalman_loglikelihood` accumulates. This is the standard "optimal
+importance function" for SIS (Doucet, Godsill & Andrieu, 2000): still
+exact importance sampling for any `θ` (unbiased regardless of how far `θ`
+is from the data-generating parameters, not just at the optimum), it just
+uses `values[t]` when proposing instead of only when weighting, so weight
+variance grows far more slowly with `T`. It requires no resampling and
+therefore raises none of resampling's differentiability problems -- it's a
+different fix for the same degeneracy, not a resampling workaround.
 """
-function differentiable_particle_loglikelihood(θ, values, standard_normals::AbstractMatrix)
+function differentiable_particle_loglikelihood(θ, values, standard_normals::AbstractMatrix; proposal::Symbol=:bootstrap)
     level, level_variance, observation_variance = θ[1], θ[2], θ[3]
     n_particles = size(standard_normals, 1)
     T = length(values)
 
     RT = promote_type(typeof(level), typeof(level_variance), typeof(observation_variance))
-    level_sd = sqrt(level_variance)
-    log_norm_const = -0.5 * log(2 * pi * observation_variance)
-
     x = fill(convert(RT, level), n_particles)
     log_weights = zeros(RT, n_particles)
 
-    for t in 1:T
-        @inbounds for i in 1:n_particles
-            x[i] = x[i] + level_sd * standard_normals[i, t]
-            log_weights[i] += log_norm_const - 0.5 * (values[t] - x[i])^2 / observation_variance
+    if proposal === :bootstrap
+        level_sd = sqrt(level_variance)
+        log_norm_const = -0.5 * log(2 * pi * observation_variance)
+        for t in 1:T
+            @inbounds for i in 1:n_particles
+                x[i] = x[i] + level_sd * standard_normals[i, t]
+                log_weights[i] += log_norm_const - 0.5 * (values[t] - x[i])^2 / observation_variance
+            end
         end
+    elseif proposal === :optimal
+        marginal_variance = level_variance + observation_variance
+        post_variance = level_variance * observation_variance / marginal_variance
+        post_sd = sqrt(post_variance)
+        log_norm_const = -0.5 * log(2 * pi * marginal_variance)
+        for t in 1:T
+            y = values[t]
+            @inbounds for i in 1:n_particles
+                pred_mean = x[i]
+                log_weights[i] += log_norm_const - 0.5 * (y - pred_mean)^2 / marginal_variance
+                post_mean = post_variance * (pred_mean / level_variance + y / observation_variance)
+                x[i] = post_mean + post_sd * standard_normals[i, t]
+            end
+        end
+    else
+        throw(ArgumentError("proposal must be :bootstrap or :optimal, got $(repr(proposal))"))
     end
 
     m = maximum(log_weights)
@@ -90,7 +139,7 @@ function differentiable_particle_loglikelihood(θ, values, standard_normals::Abs
 end
 
 """
-    get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, rng=Random.default_rng())
+    get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal=:bootstrap, rng=Random.default_rng())
 
 Gradient-friendly counterpart to get_loss_function(::Val{LocalLevel}, ...):
 returns `φ -> -loglik` where `φ` is `[level, log(level_variance),
@@ -99,13 +148,14 @@ positive without box constraints in the optimizer). Draws the particles'
 standard normals once and closes over them, so repeated calls to the
 returned function -- as an optimizer makes -- evaluate a fixed,
 deterministic, differentiable surface rather than a fresh Monte Carlo draw
-each time.
+each time. `proposal` is passed through to
+`differentiable_particle_loglikelihood` (see its docstring).
 """
-function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, rng=Random.default_rng())
+function get_loss_function_gradient(::Val{LocalLevel}, values; particle_count=200, proposal::Symbol=:bootstrap, rng=Random.default_rng())
     standard_normals = randn(rng, particle_count, length(values))
     return φ -> begin
         level, level_variance, observation_variance = φ[1], exp(φ[2]), exp(φ[3])
-        -differentiable_particle_loglikelihood([level, level_variance, observation_variance], values, standard_normals)
+        -differentiable_particle_loglikelihood([level, level_variance, observation_variance], values, standard_normals; proposal=proposal)
     end
 end
 
@@ -236,7 +286,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal=:bootstrap, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
@@ -246,6 +296,12 @@ descent. Returns (fitted LocalLevel, iterations_used) -- the iteration
 count from whichever restart won is exposed because one L-BFGS iteration
 and one bboptimize2 function evaluation aren't the same unit of work, so
 wall-clock time and iteration count both matter for comparing the two.
+
+`proposal` defaults to `:bootstrap` to keep this function's behavior
+unchanged from earlier callers; pass `proposal=:optimal` to use the
+locally optimal (Kalman-update) proposal instead, which is expected to
+reduce importance weight degeneracy without needing more particles or any
+resampling -- see `differentiable_particle_loglikelihood`'s docstring.
 
 Unlike bboptimize2, which explores many candidates at once via its
 population, a single L-BFGS run has no global search of its own -- it
@@ -266,8 +322,8 @@ actually lets L-BFGS reach a comparable optimum, not the choice of
 optimizer -- L-BFGS was already finding that same mediocre point in far
 fewer iterations than plain gradient descent, just as reliably.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, rng=Random.default_rng())
-    loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, rng=rng)
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, rng=Random.default_rng())
+    loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, proposal=proposal, rng=rng)
 
     level_guesses = (minimum(values), sum(values) / length(values), maximum(values))
     base_variance_guess = var(values) / length(values)
