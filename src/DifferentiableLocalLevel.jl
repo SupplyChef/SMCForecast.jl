@@ -189,12 +189,23 @@ function differentiable_particle_loglikelihood(θ, values, standard_normals::Abs
             # block's own contribution pick up where this leaves off.
             total_loglik += m + log(w_sum) - log(n_particles)
 
-            W = w_unnorm ./ w_sum
+            # log(W), computed directly from log_weights rather than
+            # log(exp(log_weights - m) / w_sum): a particle with truly
+            # negligible weight can have its *linear* weight underflow to
+            # exactly 0.0 in Float64, and log's derivative is 1/x -- at
+            # x == 0.0 that's Inf, which ForwardDiff then multiplies by
+            # that same underflowed (zero) partial derivative, giving
+            # Inf * 0.0 = NaN that poisons every later iteration. log_W
+            # here never round-trips through exp, so it stays finite
+            # (and differentiable) even when the corresponding linear
+            # weight itself would underflow.
+            log_W = log_weights .- m .- log(w_sum)
+            W = exp.(log_W)
             q = resample_alpha .* W .+ (1 - resample_alpha) / n_particles
             ancestors = systematic_resample_indices(q, u0)
 
             x = x[ancestors]
-            log_weights = log.(W[ancestors] ./ q[ancestors])
+            log_weights = log_W[ancestors] .- log.(q[ancestors])
         end
     end
 
