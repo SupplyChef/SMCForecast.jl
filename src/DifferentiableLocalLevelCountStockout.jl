@@ -84,7 +84,7 @@ function log_zigp_pmf(k::Int, lambda, theta, pi)
 end
 
 """
-    differentiable_particle_loglikelihood(θ, values, standard_normals, regime_uniforms; resample_every=0, resampling_uniforms=nothing)
+    differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, θ, values, standard_normals, regime_uniforms; resample_every=0, resampling_uniforms=nothing)
 
 `θ` is `[level1, level2, level_variance, zero_inflation, overdispersion,
 p12, p22]` (matching `get_loss_function(::Val{LocalLevelCountStockout},
@@ -99,8 +99,21 @@ transition -- see the module-level note above. Bootstrap proposal only
 (there is no locally-optimal proposal for this model); `resample_every`/
 `resampling_uniforms` behave exactly as on the other two models' versions
 of this function, reusing `systematic_resample_indices` unchanged.
+
+The leading `::Val{LocalLevelCountStockout}` argument exists purely to
+disambiguate this method from LocalLevelChange's own
+`differentiable_particle_loglikelihood`: both take `(θ, values,
+::AbstractMatrix, ::AbstractMatrix; ...)`, an identical dispatch signature
+(argument *names* don't participate in dispatch), so without this they
+don't coexist as two methods -- the second one loaded silently overwrites
+the first ("Method overwriting is not permitted during Module
+precompilation"), and every call meant for LocalLevelChange's version
+would actually run this one instead (caught in CI as a BoundsError
+indexing this function's `θ[6]`/`θ[7]` into LocalLevelChange's 5-element
+θ). LocalLevel's own version of this function has no such clash since it
+takes only one `AbstractMatrix` positional argument, not two.
 """
-function differentiable_particle_loglikelihood(θ, values, standard_normals::AbstractMatrix, regime_uniforms::AbstractMatrix;
+function differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, θ, values, standard_normals::AbstractMatrix, regime_uniforms::AbstractMatrix;
                                                 resample_every::Int=0,
                                                 resampling_uniforms::Union{Nothing,AbstractVector}=nothing)
     level1, level2, level_variance, zero_inflation, overdispersion, p12, p22 = θ[1], θ[2], θ[3], θ[4], θ[5], θ[6], θ[7]
@@ -184,7 +197,7 @@ function get_loss_function_gradient(::Val{LocalLevelCountStockout}, values; part
     return φ -> begin
         level1, level2, level_variance = exp(φ[1]), exp(φ[2]), exp(φ[3])
         zero_inflation, overdispersion, p12, p22 = sigmoid(φ[4]), sigmoid(φ[5]), sigmoid(φ[6]), sigmoid(φ[7])
-        -differentiable_particle_loglikelihood([level1, level2, level_variance, zero_inflation, overdispersion, p12, p22], values,
+        -differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), [level1, level2, level_variance, zero_inflation, overdispersion, p12, p22], values,
                                                 standard_normals, regime_uniforms;
                                                 resample_every=resample_every, resampling_uniforms=resampling_uniforms)
     end

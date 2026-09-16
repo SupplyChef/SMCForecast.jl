@@ -34,7 +34,7 @@
     # forecast), which would silently reject every transition into state 2
     # and produce data indistinguishable from a plain LocalLevel series.
     obs, _ = predict_observations(smc_gen, T; happy_only=false, rng=rng)
-    values = map(o -> round(o[1]), obs)
+    values = map(o -> Float64(round(o[1])), obs)
 
     true_xs = [true_system.level1, true_system.level2, true_system.level_variance,
                true_system.zero_inflation, true_system.overdispersion,
@@ -108,7 +108,7 @@ end
     smc_gen = SMC{MVector{3, Float64}, LocalLevelCountStockout}(true_system, 1)
     initialize!(smc_gen; rng=rng)
     obs, _ = predict_observations(smc_gen, T; happy_only=false, rng=rng)
-    values = map(o -> round(o[1]), obs)
+    values = map(o -> Float64(round(o[1])), obs)
 
     θ0 = [true_system.level1, true_system.level2, true_system.level_variance,
           true_system.zero_inflation, true_system.overdispersion,
@@ -121,35 +121,35 @@ end
     # equivalent test, just a Monte Carlo one rather than an exact one.
     standard_normals = randn(MersenneTwister(99), 5000, T)
     regime_uniforms = rand(MersenneTwister(100), 5000, T)
-    reference_ll = SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals, regime_uniforms)
+    reference_ll = SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ0, values, standard_normals, regime_uniforms)
     @test isfinite(reference_ll)
 
     # Must actually be usable by ForwardDiff -- a non-finite or all-zero
     # gradient would mean the function silently isn't differentiable (e.g.
     # a stray hard-coded ::Float64/::Int guard truncating Dual numbers, the
     # exact failure mode log_zigp_pmf's docstring calls out).
-    grad = ForwardDiff.gradient(θ -> SMCForecast.differentiable_particle_loglikelihood(θ, values, standard_normals, regime_uniforms), θ0)
+    grad = ForwardDiff.gradient(θ -> SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ, values, standard_normals, regime_uniforms), θ0)
     @test all(isfinite, grad)
     @test any(g -> abs(g) > 1e-6, grad)
 
     # resample_every=0 must reproduce the pre-existing no-resampling
     # arithmetic exactly (regression check that adding the option didn't
     # perturb default behavior).
-    @test SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals, regime_uniforms; resample_every=0) == reference_ll
+    @test SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ0, values, standard_normals, regime_uniforms; resample_every=0) == reference_ll
 
     standard_normals_small = randn(MersenneTwister(99), 50, T)
     regime_uniforms_small = rand(MersenneTwister(100), 50, T)
-    particle_ll_small = SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals_small, regime_uniforms_small)
+    particle_ll_small = SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ0, values, standard_normals_small, regime_uniforms_small)
 
     resample_every = 10
     n_resamples = count(t -> t % resample_every == 0, 1:(T - 1))
     resampling_uniforms = rand(MersenneTwister(123), n_resamples)
 
-    particle_ll_resampled_small = SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals_small, regime_uniforms_small;
+    particle_ll_resampled_small = SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ0, values, standard_normals_small, regime_uniforms_small;
                                                                                      resample_every=resample_every, resampling_uniforms=resampling_uniforms)
     @test isfinite(particle_ll_resampled_small)
 
-    grad_resampled = ForwardDiff.gradient(θ -> SMCForecast.differentiable_particle_loglikelihood(θ, values, standard_normals_small, regime_uniforms_small;
+    grad_resampled = ForwardDiff.gradient(θ -> SMCForecast.differentiable_particle_loglikelihood(Val{LocalLevelCountStockout}(), θ, values, standard_normals_small, regime_uniforms_small;
                                                                                                    resample_every=resample_every, resampling_uniforms=resampling_uniforms), θ0)
     @test all(isfinite, grad_resampled)
     @test any(g -> abs(g) > 1e-6, grad_resampled)
