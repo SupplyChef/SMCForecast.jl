@@ -94,37 +94,34 @@
     # leaning on :optimal isn't a real fix: it only exists because
     # LocalLevel happens to be linear-Gaussian, so it wouldn't help a model
     # with a discrete state (e.g. LocalLevelCountStockout), which is
-    # exactly the case resampling is supposed to cover. An earlier version
-    # of this exact bootstrap+resample_every=30/maxiter=50 combination
-    # closed the gap (kalman-ll=-475.34, only 0.63 off true) but took 57s,
-    # ~11x *slower* than bboptimize2 -- defeating the reason for using
-    # gradients at all.
+    # exactly the case resampling is supposed to cover.
     #
-    # The actual root cause of that slowdown: resampling's ancestor
-    # selection is a hard threshold on a fixed offset against cumsum(q), so
-    # as θ moves during optimization, crossing a threshold flips which
-    # particle a given index inherits -- a genuine (if measure-zero in
-    # θ-space) discontinuity that a smooth line search doesn't expect. lbfgs
-    # now takes max_backtracks (default 20, 10 here) to bound the Armijo
-    # backtracking loop's cost regardless of caller -- a fix that benefits
-    # every configuration, not a workaround specific to resampling. That cut
-    # 57s to 48s, and loosening tol to 1e-3 (still set below, harmless) was
-    # tried next on the theory that a discontinuity keeps the gradient norm
-    # from ever settling tight -- but it changed *nothing*: the winning
-    # restart still used the full maxiter=100 and landed at essentially the
-    # same point (same to ~10 significant figures) as with tol=1e-6. That
-    # rules out "needs a looser numerical tolerance" -- the gradient norm
-    # near this restart's endpoint doesn't shrink at all, tight or loose; it
-    # isn't converging, it's oscillating in place near the kink, indefinitely.
-    # No tol value fixes an oscillation. maxiter is the only lever that
-    # actually bounds cost here, so it's cut directly instead: the level and
-    # variances found were already stable across every maxiter tried so far
-    # (50 through 100), so a much smaller budget should land in the same
-    # neighborhood for a fraction of the cost, rather than paying for ~75
-    # more iterations of oscillation that were never converting into a
-    # better answer.
+    # Several rounds of tuning a *soft*-resampling implementation (mixing
+    # weights with a uniform floor and correcting with an importance ratio,
+    # per Karkus/Hsu/Lee 2018) got real accuracy (closed the gap to within
+    # ~0.2-0.6 of the true value) but stayed 9-11x *slower* than
+    # bboptimize2 no matter how backtracking or the convergence tolerance
+    # were tuned -- the winning L-BFGS restart just oscillated near a
+    # resampling discontinuity indefinitely rather than converging, and no
+    # optimizer-side knob fixed that. Going back to how the differentiable-
+    # SMC literature actually does this (Maddison et al. 2017 "Filtering
+    # Variational Objectives"; Naesseth et al. 2018 "Variational Sequential
+    # Monte Carlo"; Le et al. 2018 "Auto-Encoding Sequential Monte Carlo")
+    # found the likely cause: none of them use an importance correction for
+    # gradient-based training. They resample directly from the normalized
+    # weights and reset log-weights to 0 afterward (see
+    # differentiable_particle_loglikelihood's docstring) -- resampling
+    # directly from W makes the correction ratio identically 1 for
+    # whichever particle survives, so adding one back in only injects an
+    # artificial, particle-dependent jump in the objective's *value* at
+    # exactly the θ where an ancestor switches. That's a self-inflicted
+    # discontinuity on top of the irreducible one from the hard ancestor
+    # choice itself, and is the more likely reason the line search
+    # struggled. This tests the corrected, literature-standard version at
+    # plain default settings (no exotic tol/max_backtracks tuning) to see
+    # whether it's smooth enough for L-BFGS on its own.
     t_grad_resampled = @elapsed begin
-        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=25, tol=1e-3, max_backtracks=10, rng=MersenneTwister(1))
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, rng=MersenneTwister(1))
     end
     @test fitted_grad_resampled.level_variance > 0
     @test fitted_grad_resampled.observation_variance > 0
@@ -140,7 +137,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=25, tol=1e-3, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
+    println("gradient fit (bootstrap+resample every 30, N=300): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
@@ -157,12 +154,11 @@
     @test t_grad < 60.0
     @test t_grad_bigN < 120.0
     @test t_grad_optimal < 60.0
-    # max_backtracks=10 is meant to make this fast without leaning on
-    # :optimal (see the comment above t_grad_resampled) -- not tightened to
-    # bboptimize2's own 5.09s since that's one MaxTime-boxed run, not a
-    # hard target, but still meant to catch a regression back into "slower
-    # than the derivative-free method", which would defeat the purpose of
-    # using gradients at all.
+    # Not tightened to bboptimize2's own 5.09s since that's one
+    # MaxTime-boxed run, not a hard target, but still meant to catch a
+    # regression back into "slower than the derivative-free method", which
+    # would defeat the purpose of using gradients at all (see the comment
+    # above t_grad_resampled for what already failed this bar and why).
     @test t_grad_resampled < t_deriv_free * 3
 end
 
@@ -238,10 +234,13 @@ end
     @test SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals; resample_every=0) == particle_ll
     @test SMCForecast.differentiable_particle_loglikelihood(θ0, values, standard_normals; proposal=:optimal, resample_every=0) == particle_ll_optimal
 
-    # Differentiable resampling (soft resampling, Karkus/Hsu/Lee 2018): a
-    # second, model-agnostic answer to the same weight-degeneracy problem
-    # that -- unlike proposal=:optimal -- doesn't depend on LocalLevel
-    # being linear-Gaussian. Tested here with the plain bootstrap proposal
+    # Differentiable resampling (resample directly from the normalized
+    # weights and reset log-weights to 0 afterward, the standard treatment
+    # in the gradient-based SMC literature -- see
+    # differentiable_particle_loglikelihood's docstring): a second,
+    # model-agnostic answer to the same weight-degeneracy problem that --
+    # unlike proposal=:optimal -- doesn't depend on LocalLevel being
+    # linear-Gaussian. Tested here with the plain bootstrap proposal
     # specifically, so any improvement it shows isn't riding on the
     # Gaussian-specific fix above. At the same small particle count as the
     # bootstrap-vs-optimal comparison, periodic resampling should bring the
