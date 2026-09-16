@@ -398,7 +398,7 @@ Julia-1.8-compatibility risk (see `lbfgs`'s docstring for why Optim.jl
 itself was already ruled out for a related reason) that deserves
 validating deliberately rather than folding into this fix.
 
-# Reverse-mode AD (`gradient_function`)
+# Reverse-mode AD (`gradient_function`) -- investigated and not adopted
 
 `gradient_function` (default `ForwardDiff.gradient`, unchanged from before)
 is passed straight through to `lbfgs`. Following up on the note above,
@@ -448,6 +448,31 @@ scalar in an ordinary `Array` -- which is why this never came up before
 ReverseDiff was tried, and is exactly the kind of implementation detail
 "investigate a new AD tool" means checking, not just a Julia-version
 compat bound.
+
+**Conclusion (real CI numbers, `test_gradient_fitting_locallevelcountstockout.jl`'s
+"Reverse-mode AD" testitem):** once the mutation issue above was fixed,
+`ReverseDiff.gradient` matched `ForwardDiff.gradient` element-wise to
+~10 significant digits -- the implementation is correct. But
+`fit_gradient` with `gradient_function=ReverseDiff.gradient` took ~168s
+against `ForwardDiff.gradient`'s ~27s on identical data, restarts, and
+RNG seed: about 6x *slower*, not faster. Reverse-mode AD's usual
+advantage -- cost scaling with a constant multiple of one forward pass,
+regardless of parameter count -- assumes that constant multiple (the
+overhead of building and walking an instruction tape) is small relative
+to the work being differentiated. At only 7 parameters, and with a
+compiled tape ruled unsafe above (so every gradient call pays full
+retracing cost), that assumption doesn't hold here: this function's inner
+loop is ~45,000 iterations of a handful of cheap scalar operations each,
+and ReverseDiff's per-operation tape bookkeeping overhead dominates far
+more than ForwardDiff's per-operation Dual-partial-propagation overhead
+does, despite ForwardDiff paying an explicit 7x multiplier that
+ReverseDiff in principle avoids. Reverse-mode AD's crossover point is
+real, but it's at dozens-to-thousands of parameters for a loop-heavy
+function like this one, not single digits. `ForwardDiff.gradient` remains
+the right default; `gradient_function=ReverseDiff.gradient` stays
+available mainly so this finding has a runnable, tested reference rather
+than only a paragraph of prose, and to guard against a future correctness
+regression, not because switching to it is expected to help.
 """
 function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200, maxiter=200, tol::Real=1e-6, resample_every::Int=0, max_backtracks::Int=20, rng=Random.default_rng(), gradient_function=ForwardDiff.gradient)
     loss = get_loss_function_gradient(Val{LocalLevelCountStockout}(), values; particle_count=particle_count, resample_every=resample_every, rng=rng)

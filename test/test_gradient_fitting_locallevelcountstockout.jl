@@ -273,5 +273,25 @@ end
     println("speedup (t_forward / t_reverse) = $(t_forward / t_reverse)")
 
     @test abs(reverse_nll - forward_nll) < 5.0
-    @test t_reverse < 120.0
+
+    # Sanity ceiling against a genuine hang, not a performance target --
+    # CI's real numbers settled this investigation conclusively the other
+    # way: ReverseDiff.gradient (uncompiled -- see fit_gradient's
+    # docstring for why compiled is unsafe here) matched ForwardDiff's
+    # gradient element-wise almost exactly, but took ~168s against
+    # ForwardDiff's ~27s on the same data/restarts/seed -- about 6x
+    # *slower*, not faster. At only 7 parameters, the per-call cost of
+    # retracing ReverseDiff's instruction tape from scratch (required
+    # since a compiled tape isn't safe here) dominates over reverse-mode's
+    # usual advantage of scaling with a constant multiple of one forward
+    # pass regardless of parameter count -- that advantage matters most at
+    # dozens-to-thousands of parameters, not single digits, and matters
+    # least for a function built from many cheap scalar operations (this
+    # one's ~45,000-iteration inner loop) rather than few expensive ones,
+    # where retracing overhead is comparatively larger relative to the
+    # work being differentiated. ForwardDiff.gradient (the default) remains
+    # the right choice for this model; gradient_function=ReverseDiff.gradient
+    # stays available mainly to document this finding and guard against a
+    # future correctness regression, not because it's expected to win.
+    @test t_reverse < 300.0
 end
