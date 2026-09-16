@@ -89,32 +89,36 @@
     @test fitted_grad_optimal.observation_variance > 0
     kalman_ll_grad_optimal = SMCForecast.kalman_loglikelihood(fitted_grad_optimal.level, fitted_grad_optimal.level_variance, fitted_grad_optimal.observation_variance, values)
 
-    # A plain-bootstrap + resample_every=30/maxiter=50 run (kept in an
-    # earlier version of this test) already proved differentiable
-    # resampling closes the gap even without :optimal's Gaussian-specific
-    # help (kalman-ll=-475.34, only 0.63 off true) -- but it took 57s,
-    # ~11x *slower* than bboptimize2's 5.09s, which defeats the reason for
-    # using gradients at all. That test is gone; the cheap, non-optimizing
-    # small-N comparison a few lines into the next @testitem already
-    # covers the same "resampling helps generically" point far more
-    # cheaply (a single likelihood+gradient eval, not a 9-restart L-BFGS
-    # run), so it isn't lost, just no longer paid for here every run.
+    # Second diagnostic/candidate fix: the plain bootstrap proposal --
+    # *not* :optimal -- plus periodic differentiable resampling, since
+    # leaning on :optimal isn't a real fix: it only exists because
+    # LocalLevel happens to be linear-Gaussian, so it wouldn't help a model
+    # with a discrete state (e.g. LocalLevelCountStockout), which is
+    # exactly the case resampling is supposed to cover. An earlier version
+    # of this exact bootstrap+resample_every=30/maxiter=50 combination
+    # closed the gap (kalman-ll=-475.34, only 0.63 off true) but took 57s,
+    # ~11x *slower* than bboptimize2 -- defeating the reason for using
+    # gradients at all.
     #
-    # What's tested here instead is the fix that's actually meant to ship:
-    # :optimal (already ~9x faster than bboptimize2 on its own, seen
-    # above) plus *sparse* resampling layered on top. :optimal already
-    # suppresses most of the degeneracy a bare bootstrap proposal has, so
-    # it should need far fewer resampling events -- and therefore pay far
-    # less of resampling's discontinuity-driven line-search tax (see the
-    # comment on the removed run above) -- to close most of what remains
-    # of its own -3.24 gap, while staying meaningfully faster than
-    # bboptimize2 rather than ~11x slower.
-    t_grad_optimal_resampled = @elapsed begin
-        fitted_grad_optimal_resampled, iterations_used_optimal_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, proposal=:optimal, resample_every=50, maxiter=100, rng=MersenneTwister(1))
+    # The actual root cause of that slowdown: resampling's ancestor
+    # selection is a hard threshold on a fixed offset against cumsum(q), so
+    # as θ moves during optimization, crossing a threshold flips which
+    # particle a given index inherits -- a genuine (if measure-zero in
+    # θ-space) discontinuity that a smooth line search doesn't expect. That
+    # was making Armijo backtracking bottom out repeatedly, each such
+    # iteration costing up to ~46 extra evaluations (lbfgs's line search
+    # backtracks until step <= 1e-14, roughly log2(1e14) halvings). lbfgs
+    # now takes max_backtracks (default 20) to bound that cost per
+    # iteration regardless of caller; capped harder here (10) since this is
+    # exactly the pathological case it exists for. This is a fix to the
+    # optimizer that benefits every configuration, not a workaround specific
+    # to resampling or to this one model.
+    t_grad_resampled = @elapsed begin
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=100, max_backtracks=10, rng=MersenneTwister(1))
     end
-    @test fitted_grad_optimal_resampled.level_variance > 0
-    @test fitted_grad_optimal_resampled.observation_variance > 0
-    kalman_ll_grad_optimal_resampled = SMCForecast.kalman_loglikelihood(fitted_grad_optimal_resampled.level, fitted_grad_optimal_resampled.level_variance, fitted_grad_optimal_resampled.observation_variance, values)
+    @test fitted_grad_resampled.level_variance > 0
+    @test fitted_grad_resampled.observation_variance > 0
+    kalman_ll_grad_resampled = SMCForecast.kalman_loglikelihood(fitted_grad_resampled.level, fitted_grad_resampled.level_variance, fitted_grad_resampled.observation_variance, values)
 
     t_deriv_free = @elapsed begin
         fitted_bb = SMCForecast.fit(Val{LocalLevel}(), values; maxtime=5.0, size=200)
@@ -126,7 +130,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (optimal+resample every 50, N=300, maxiter=100): level=$(fitted_grad_optimal_resampled.level), level_variance=$(fitted_grad_optimal_resampled.level_variance), observation_variance=$(fitted_grad_optimal_resampled.observation_variance), kalman-ll=$kalman_ll_grad_optimal_resampled, $(iterations_used_optimal_resampled) iterations, $(t_grad_optimal_resampled)s")
+    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=100, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
@@ -143,16 +147,13 @@
     @test t_grad < 60.0
     @test t_grad_bigN < 120.0
     @test t_grad_optimal < 60.0
-    # The whole point of adding resampling on top of :optimal rather than
-    # on top of bootstrap is to stay fast: sparse resampling events (2 over
-    # T=150, vs bootstrap+resampling's 5 events at 57s/~11x slower than
-    # bboptimize2 in an earlier version of this test) should pay much less
-    # of the discontinuity-driven line-search tax described above
-    # t_grad_optimal_resampled. Not tightened to bboptimize2's own 5.09s
-    # since that number is itself just one MaxTime-boxed run, not a hard
-    # target -- but still meant to catch a regression back into "slower
-    # than the derivative-free method", which would defeat the purpose.
-    @test t_grad_optimal_resampled < t_deriv_free * 3
+    # max_backtracks=10 is meant to make this fast without leaning on
+    # :optimal (see the comment above t_grad_resampled) -- not tightened to
+    # bboptimize2's own 5.09s since that's one MaxTime-boxed run, not a
+    # hard target, but still meant to catch a regression back into "slower
+    # than the derivative-free method", which would defeat the purpose of
+    # using gradients at all.
+    @test t_grad_resampled < t_deriv_free * 3
 end
 
 @testitem "Differentiable particle likelihood (LocalLevel): matches the Kalman oracle and is ForwardDiff-differentiable" begin

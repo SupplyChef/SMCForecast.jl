@@ -299,7 +299,7 @@ function lbfgs_direction(grad, s_history, y_history, rho_history)
 end
 
 """
-    lbfgs(g, φ0; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+    lbfgs(g, φ0; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20)
 
 Limited-memory BFGS with a backtracking (Armijo) line search, using
 ForwardDiff for gradients. Dependency-free (no Optim.jl) -- Optim's latest
@@ -317,8 +317,25 @@ convergence instead, which is the actual "a gradient is cheap, dimension
 doesn't matter" argument for preferring gradients over derivative-free
 search -- plain steepest descent doesn't realize that argument by itself.
 Returns (φ_opt, f_opt, iterations_used).
+
+`max_backtracks` bounds the Armijo backtracking loop below to at most
+that many halvings (in addition to the implicit ~46 from `step > 1e-14`,
+whichever binds first) before giving up and accepting whatever candidate
+it has -- which the loop falls through to unconditionally already once
+backtracking bottoms out, so this only changes how *many* evaluations
+that costs, not whether an unsatisfying step can be accepted. This matters
+because `g` isn't always smooth: `differentiable_particle_loglikelihood`
+with `resample_every > 0` has genuine, if measure-zero in θ-space,
+discontinuities where a resampling ancestor selection flips, and a
+discontinuous function can fail the Armijo condition unpredictably rather
+than smoothly approaching it, which was observed to make backtracking
+repeatedly nearly bottom out -- each such iteration costs up to ~46 extra
+evaluations of `g` (and its ForwardDiff gradient afterward), which is
+exactly what made an earlier resampling experiment take 516s. Capping it
+here bounds the worst case for every caller, resampling or not, rather
+than working around it only where it was first noticed.
 """
-function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5)
+function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20)
     φ = copy(φ0)
     f_val = g(φ)
     grad = ForwardDiff.gradient(g, φ)
@@ -358,10 +375,12 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
         # comparison against NaN is false, so an overshot candidate that
         # blows up the objective would otherwise read as "Armijo satisfied"
         # and get accepted, poisoning every later iteration with NaN.
-        while (!isfinite(f_candidate) || f_candidate > f_val + armijo_c * step * directional_derivative) && step > 1e-14
+        backtracks = 0
+        while (!isfinite(f_candidate) || f_candidate > f_val + armijo_c * step * directional_derivative) && step > 1e-14 && backtracks < max_backtracks
             step *= backtrack_factor
             φ_candidate = φ .+ step .* direction
             f_candidate = g(φ_candidate)
+            backtracks += 1
         end
 
         if !isfinite(f_candidate)
@@ -396,7 +415,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
 end
 
 """
-    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal=:bootstrap, rng=Random.default_rng())
+    fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal=:bootstrap, resample_every=0, resample_alpha=0.5, max_backtracks=20, rng=Random.default_rng())
 
 Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
@@ -435,7 +454,7 @@ actually lets L-BFGS reach a comparable optimum, not the choice of
 optimizer -- L-BFGS was already finding that same mediocre point in far
 fewer iterations than plain gradient descent, just as reliably.
 """
-function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, rng=Random.default_rng())
+function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200, proposal::Symbol=:bootstrap, resample_every::Int=0, resample_alpha::Real=0.5, max_backtracks::Int=20, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevel}(), values; particle_count=particle_count, proposal=proposal,
                                        resample_every=resample_every, resample_alpha=resample_alpha, rng=rng)
 
@@ -449,7 +468,7 @@ function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200
     for level0 in level_guesses, scale in scale_guesses
         φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
-        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter)
+        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter, max_backtracks=max_backtracks)
         if f_opt < best_f
             best_f = f_opt
             best_φ = φ_opt
