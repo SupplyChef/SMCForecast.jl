@@ -63,6 +63,7 @@ include("DifferentiableLocalLevelChange.jl")
 include("LocalLevelExplanatory.jl")
 include("CountStockoutCore.jl")
 include("LocalLevelCountStockout.jl")
+include("DifferentiableLocalLevelCountStockout.jl")
 include("LocalLevelCountStockoutExplanatory.jl")
 include("LocalLevelCountStockoutExplanatoryML.jl")
 
