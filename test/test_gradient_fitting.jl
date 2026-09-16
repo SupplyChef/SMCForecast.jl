@@ -58,7 +58,7 @@
     SMCForecast.fit(Val{LocalLevel}(), values[1:10]; maxtime=1, size=10)
 
     t_grad = @elapsed begin
-        fitted_grad, iterations_used = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, rng=MersenneTwister(1))
+        fitted_grad, iterations_used, n_feval_grad, n_geval_grad = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, rng=MersenneTwister(1))
     end
     @test fitted_grad.level_variance > 0
     @test fitted_grad.observation_variance > 0
@@ -73,7 +73,7 @@
     # diagnostic, not a correctness check, and its outcome decides whether
     # the accuracy gap is fixable by particle count alone.
     t_grad_bigN = @elapsed begin
-        fitted_grad_bigN, iterations_used_bigN = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=5000, rng=MersenneTwister(1))
+        fitted_grad_bigN, iterations_used_bigN, n_feval_bigN, n_geval_bigN = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=5000, rng=MersenneTwister(1))
     end
     kalman_ll_grad_bigN = SMCForecast.kalman_loglikelihood(fitted_grad_bigN.level, fitted_grad_bigN.level_variance, fitted_grad_bigN.observation_variance, values)
 
@@ -83,7 +83,7 @@
     # bias, not Monte Carlo noise -- see differentiable_particle_loglikelihood's
     # docstring for why this proposal is expected to degenerate far slower.
     t_grad_optimal = @elapsed begin
-        fitted_grad_optimal, iterations_used_optimal = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, proposal=:optimal, rng=MersenneTwister(1))
+        fitted_grad_optimal, iterations_used_optimal, n_feval_optimal, n_geval_optimal = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, proposal=:optimal, rng=MersenneTwister(1))
     end
     @test fitted_grad_optimal.level_variance > 0
     @test fitted_grad_optimal.observation_variance > 0
@@ -138,7 +138,7 @@
     # this smooth landscape, so trimming further should clear the bar with
     # room to spare rather than needing another round.
     t_grad_resampled = @elapsed begin
-        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=20, rng=MersenneTwister(1))
+        fitted_grad_resampled, iterations_used_resampled, n_feval_resampled, n_geval_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=20, rng=MersenneTwister(1))
     end
     @test fitted_grad_resampled.level_variance > 0
     @test fitted_grad_resampled.observation_variance > 0
@@ -150,11 +150,22 @@
     kalman_ll_bb = SMCForecast.kalman_loglikelihood(fitted_bb.level, fitted_bb.level_variance, fitted_bb.observation_variance, values)
     @test kalman_ll_bb > kalman_ll_at_truth - slack
 
+    # n_feval/n_geval are exact counts (see lbfgs's docstring), not
+    # estimates: n_feval is every plain (Float64) call to the loss closure
+    # (the initial candidate plus every Armijo backtrack), n_geval is every
+    # ForwardDiff.gradient call (each internally evaluates the closure once
+    # more, but with a length-3 Dual argument in a single chunk -- costlier
+    # per call than a plain eval, not 3 separate calls). Both are summed
+    # across all 9 restarts. bboptimize2's own per-candidate evaluation
+    # count for this exact call is printed by bboptimize2 itself (in
+    # SMC.jl) immediately above this block, as "<n>, <elapsed>, <best_f>,
+    # <best_x>" -- look for the line right before "true params:" in the
+    # log to get its number for direct comparison.
     println("true params:            level=$true_level, level_variance=$true_level_variance, observation_variance=$true_observation_variance, kalman-ll=$kalman_ll_at_truth")
-    println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
-    println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
-    println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=20): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
+    println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations (winning restart), $(n_feval_grad) feval + $(n_geval_grad) geval (all 9 restarts), $(t_grad)s")
+    println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations (winning restart), $(n_feval_bigN) feval + $(n_geval_bigN) geval (all 9 restarts), $(t_grad_bigN)s")
+    println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations (winning restart), $(n_feval_optimal) feval + $(n_geval_optimal) geval (all 9 restarts), $(t_grad_optimal)s")
+    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=20): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations (winning restart), $(n_feval_resampled) feval + $(n_geval_resampled) geval (all 9 restarts), $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed

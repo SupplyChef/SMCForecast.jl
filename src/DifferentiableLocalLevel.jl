@@ -314,7 +314,16 @@ last `memory` (position, gradient) changes and gets superlinear
 convergence instead, which is the actual "a gradient is cheap, dimension
 doesn't matter" argument for preferring gradients over derivative-free
 search -- plain steepest descent doesn't realize that argument by itself.
-Returns (φ_opt, f_opt, iterations_used).
+Returns (φ_opt, f_opt, iterations_used, n_feval, n_geval): `n_feval`
+counts every plain (`Float64`-in, `Float64`-out) call to `g`, and
+`n_geval` counts every `ForwardDiff.gradient(g, ...)` call -- each of
+those internally evaluates `g` exactly once too, but with a length-3
+`Dual` argument (this function's `φ` always has 3 components), which
+ForwardDiff computes in a single chunk covering all 3 partials at once,
+not 3 separate evaluations. These counts exist to answer, with real
+numbers instead of an estimate, "how many evaluations does this actually
+make, and how does that compare to bboptimize2's?" -- see fit_gradient's
+docstring for how they're used.
 
 `max_backtracks` bounds the Armijo backtracking loop below to at most
 that many halvings (in addition to the implicit ~46 from `step > 1e-14`,
@@ -336,7 +345,9 @@ than working around it only where it was first noticed.
 function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10, initial_step=1.0, armijo_c=1e-4, backtrack_factor=0.5, max_backtracks=20)
     φ = copy(φ0)
     f_val = g(φ)
+    n_feval = 1
     grad = ForwardDiff.gradient(g, φ)
+    n_geval = 1
 
     s_history = typeof(φ)[]
     y_history = typeof(φ)[]
@@ -369,6 +380,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
         step = initial_step
         φ_candidate = φ .+ step .* direction
         f_candidate = g(φ_candidate)
+        n_feval += 1
         # The non-finite check is required, not optional: any IEEE 754
         # comparison against NaN is false, so an overshot candidate that
         # blows up the objective would otherwise read as "Armijo satisfied"
@@ -378,6 +390,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
             step *= backtrack_factor
             φ_candidate = φ .+ step .* direction
             f_candidate = g(φ_candidate)
+            n_feval += 1
             backtracks += 1
         end
 
@@ -386,6 +399,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
         end
 
         grad_candidate = ForwardDiff.gradient(g, φ_candidate)
+        n_geval += 1
         s = φ_candidate .- φ
         y = grad_candidate .- grad
         sy = dot(s, y)
@@ -409,7 +423,7 @@ function lbfgs(g, φ0::AbstractVector{<:Real}; maxiter=200, tol=1e-6, memory=10,
         grad = grad_candidate
     end
 
-    return φ, f_val, iterations_used
+    return φ, f_val, iterations_used, n_feval, n_geval
 end
 
 """
@@ -419,10 +433,16 @@ Gradient-based counterpart to fit(::Val{LocalLevel}, ...): uses ForwardDiff
 through a resampling-free particle likelihood (see
 get_loss_function_gradient) instead of bboptimize2's derivative-free
 search, optimizing with L-BFGS (see lbfgs) rather than plain gradient
-descent. Returns (fitted LocalLevel, iterations_used) -- the iteration
-count from whichever restart won is exposed because one L-BFGS iteration
-and one bboptimize2 function evaluation aren't the same unit of work, so
-wall-clock time and iteration count both matter for comparing the two.
+descent. Returns (fitted LocalLevel, iterations_used, total_n_feval,
+total_n_geval) -- the iteration count from whichever restart won is
+exposed because one L-BFGS iteration and one bboptimize2 function
+evaluation aren't the same unit of work, so wall-clock time and iteration
+count both matter for comparing the two; `total_n_feval`/`total_n_geval`
+sum lbfgs's own per-restart counts (see its docstring) across all 9
+restarts below, to answer "how many evaluations does the whole fit
+actually make" with a real number instead of an estimate -- each restart
+runs independently and none of them short-circuit the others, so the
+total is a straight sum, not something bounded by whichever restart won.
 
 `proposal` and `resample_every` are passed through to
 `get_loss_function_gradient`/`differentiable_particle_loglikelihood` (see
@@ -473,10 +493,14 @@ function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200
     best_φ = nothing
     best_f = Inf
     best_iterations = 0
+    total_n_feval = 0
+    total_n_geval = 0
     for level0 in level_guesses, scale in scale_guesses
         φ0 = [level0, log(base_variance_guess * scale), log(base_variance_guess * scale)]
 
-        φ_opt, f_opt, iterations_used = lbfgs(loss, φ0; maxiter=maxiter, tol=tol, max_backtracks=max_backtracks)
+        φ_opt, f_opt, iterations_used, n_feval, n_geval = lbfgs(loss, φ0; maxiter=maxiter, tol=tol, max_backtracks=max_backtracks)
+        total_n_feval += n_feval
+        total_n_geval += n_geval
         if f_opt < best_f
             best_f = f_opt
             best_φ = φ_opt
@@ -485,5 +509,5 @@ function fit_gradient(::Val{LocalLevel}, values; particle_count=200, maxiter=200
     end
 
     level, level_variance, observation_variance = best_φ[1], exp(best_φ[2]), exp(best_φ[3])
-    return LocalLevel(level, level_variance, observation_variance), best_iterations
+    return LocalLevel(level, level_variance, observation_variance), best_iterations, total_n_feval, total_n_geval
 end
