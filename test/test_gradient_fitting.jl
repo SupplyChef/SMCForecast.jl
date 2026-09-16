@@ -107,17 +107,24 @@
     # θ-space) discontinuity that a smooth line search doesn't expect. lbfgs
     # now takes max_backtracks (default 20, 10 here) to bound the Armijo
     # backtracking loop's cost regardless of caller -- a fix that benefits
-    # every configuration, not a workaround specific to resampling. But that
-    # alone only cut 57s to 48s: capping backtracks bounds the cost of *one*
-    # bad iteration, and the real driver turned out to be that every restart
-    # was burning its *entire* maxiter=100 without ever satisfying the
-    # default tol=1e-6 -- near a discontinuity the gradient norm can
-    # legitimately never settle that tight, since the function isn't smooth
-    # there, so lbfgs was iterating for a convergence criterion the
-    # objective's own shape can't satisfy. tol=1e-3 here lets it stop once
-    # practically converged instead.
+    # every configuration, not a workaround specific to resampling. That cut
+    # 57s to 48s, and loosening tol to 1e-3 (still set below, harmless) was
+    # tried next on the theory that a discontinuity keeps the gradient norm
+    # from ever settling tight -- but it changed *nothing*: the winning
+    # restart still used the full maxiter=100 and landed at essentially the
+    # same point (same to ~10 significant figures) as with tol=1e-6. That
+    # rules out "needs a looser numerical tolerance" -- the gradient norm
+    # near this restart's endpoint doesn't shrink at all, tight or loose; it
+    # isn't converging, it's oscillating in place near the kink, indefinitely.
+    # No tol value fixes an oscillation. maxiter is the only lever that
+    # actually bounds cost here, so it's cut directly instead: the level and
+    # variances found were already stable across every maxiter tried so far
+    # (50 through 100), so a much smaller budget should land in the same
+    # neighborhood for a fraction of the cost, rather than paying for ~75
+    # more iterations of oscillation that were never converting into a
+    # better answer.
     t_grad_resampled = @elapsed begin
-        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=100, tol=1e-3, max_backtracks=10, rng=MersenneTwister(1))
+        fitted_grad_resampled, iterations_used_resampled = SMCForecast.fit_gradient(Val{LocalLevel}(), values; particle_count=300, resample_every=30, maxiter=25, tol=1e-3, max_backtracks=10, rng=MersenneTwister(1))
     end
     @test fitted_grad_resampled.level_variance > 0
     @test fitted_grad_resampled.observation_variance > 0
@@ -133,7 +140,7 @@
     println("gradient fit (bootstrap, N=300):   level=$(fitted_grad.level), level_variance=$(fitted_grad.level_variance), observation_variance=$(fitted_grad.observation_variance), kalman-ll=$kalman_ll_grad, $(iterations_used) iterations, $(t_grad)s")
     println("gradient fit (bootstrap, N=5000):  level=$(fitted_grad_bigN.level), level_variance=$(fitted_grad_bigN.level_variance), observation_variance=$(fitted_grad_bigN.observation_variance), kalman-ll=$kalman_ll_grad_bigN, $(iterations_used_bigN) iterations, $(t_grad_bigN)s")
     println("gradient fit (optimal, N=300):      level=$(fitted_grad_optimal.level), level_variance=$(fitted_grad_optimal.level_variance), observation_variance=$(fitted_grad_optimal.observation_variance), kalman-ll=$kalman_ll_grad_optimal, $(iterations_used_optimal) iterations, $(t_grad_optimal)s")
-    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=100, tol=1e-3, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
+    println("gradient fit (bootstrap+resample every 30, N=300, maxiter=25, tol=1e-3, max_backtracks=10): level=$(fitted_grad_resampled.level), level_variance=$(fitted_grad_resampled.level_variance), observation_variance=$(fitted_grad_resampled.observation_variance), kalman-ll=$kalman_ll_grad_resampled, $(iterations_used_resampled) iterations, $(t_grad_resampled)s")
     println("derivative-free:                    level=$(fitted_bb.level), level_variance=$(fitted_bb.level_variance), observation_variance=$(fitted_bb.observation_variance), kalman-ll=$kalman_ll_bb, $(t_deriv_free)s")
 
     # Not asserting t_grad < t_deriv_free: bboptimize2 is time-boxed
