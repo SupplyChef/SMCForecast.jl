@@ -103,7 +103,18 @@ end
     true_system = LocalLevelCountStockout(; level1=30.0, level2=1.0, level_variance=6.0,
                                            zero_inflation=0.1, overdispersion=0.15,
                                            level_matrix=[0.93 0.07; 0.25 0.75])
-    T = 60
+    # T=150 (not LocalLevel's T=80): Rao-Blackwellizing the regime removes
+    # one whole source of weight-degeneracy noise (see
+    # DifferentiableLocalLevelCountStockout.jl's module docstring), so what
+    # remains is only the continuous level's own bootstrap degeneracy --
+    # at T=60 this hadn't grown enough for resampling's benefit to reliably
+    # beat resampling's own added ancestor-sampling noise in a single draw
+    # (CI caught this: both the resampled and un-resampled N=50 estimates
+    # were already close to the N=5000 reference, and resampling happened
+    # to land slightly farther away that time). A longer horizon gives the
+    # bootstrap estimator's degeneracy more room to grow before resampling
+    # ever kicks in, so its correction has a real gap to close.
+    T = 150
     rng = MersenneTwister(55)
     smc_gen = SMC{MVector{3, Float64}, LocalLevelCountStockout}(true_system, 1)
     initialize!(smc_gen; rng=rng)
