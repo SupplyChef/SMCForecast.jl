@@ -82,7 +82,7 @@ function log_poisson_pmf(k::Int, lambda)
 end
 
 """
-    log_zigp_pmf(k, lambda, theta, pi)
+    log_zigp_pmf(k, lambda, theta, pi, log_one_minus_pi, log_k_factorial)
 
 log pdf of the zero-inflated generalized Poisson distribution at
 nonnegative integer `k`, matching `zigp_pmf`/`log_generalized_poisson_pmf`
@@ -95,17 +95,33 @@ argument and silently zero out its derivative, which is fine for
 and `pi` in the model's usual ranges) by construction of the caller's
 parameterization (log/logit-transformed in `fit_gradient`), so that guard
 is not reproduced here.
+
+`log_one_minus_pi` (== `log(1 - pi)`) and `log_k_factorial` (==
+`logfactorial(k)`) are supplied by the caller rather than recomputed here,
+mirroring `log_generalized_poisson_pmf`'s own `log_lambda`/`log_k_factorial`
+precomputed-argument pattern in CountStockoutCore.jl -- for the same
+reason: `differentiable_particle_loglikelihood` calls this once per
+particle *per timestep* (tens of thousands of times per loss evaluation),
+but `pi` (a single Î¸ value) and `k` (== the observed count at that
+timestep, identical across every particle) don't vary across that inner
+particle loop at all. Recomputing `log(1 - pi)` and `logfactorial(k)`
+freshly for every one of those calls was measured (via CI feval/geval
+counts and wall time -- see fit_gradient's docstring) to be a large
+fraction of this model's total cost, and unlike `log_lambda` in
+CountStockoutCore.jl's version, `lambda` itself genuinely cannot be
+hoisted the same way here: it depends on each particle's own (noisy)
+continuous level, not just on Î¸, so `log(lambda)` is recomputed per
+particle deliberately, not by oversight.
 """
-function log_zigp_pmf(k::Int, lambda, theta, pi)
+function log_zigp_pmf(k::Int, lambda, theta, pi, log_one_minus_pi, log_k_factorial)
     if k == 0
         return log(pi + (1 - pi) * exp(-lambda))
     end
-    log_one_minus_pi = log(1 - pi)
     if k == 1
         return log_one_minus_pi + log(lambda) - (lambda + theta)
     end
     v = lambda + k * theta
-    return log_one_minus_pi + log(lambda) + (k - 1) * log(v) - v - logfactorial(k)
+    return log_one_minus_pi + log(lambda) + (k - 1) * log(v) - v - log_k_factorial
 end
 
 """
@@ -171,9 +187,27 @@ function differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, Î
 
     level_sd = sqrt(level_variance)
     one_minus_od_over_one_minus_zi = (1 - overdispersion) / (1 - zero_inflation)
+    # Hoisted once for the whole call (see log_zigp_pmf's docstring): pi
+    # (zero_inflation) never changes across the particle x timestep loop
+    # below.
+    log_one_minus_zi = log(1 - zero_inflation)
 
     for t in 1:T
         y = Int(round(values[t]))
+        # Both hoisted out of the particle loop: neither depends on the
+        # particle index. log_lik_stockout is the *entire* stockout-branch
+        # density (level2 is a plain Î¸ value, not per-particle), and
+        # log_k_factorial is log_zigp_pmf's k>=2 branch's logfactorial(k)
+        # argument, since y is this timestep's single observed count,
+        # identical for every particle. logfactorial(k::Int) never carries
+        # ForwardDiff overhead (k is always a primal Int, never a Dual), but
+        # it's still a real SpecialFunctions call, and recomputing either of
+        # these n_particles times per timestep instead of once was a large
+        # fraction of this model's measured cost (see fit_gradient's
+        # docstring for the CI numbers this was diagnosed from).
+        log_lik_stockout = log_poisson_pmf(y, level2)
+        log_k_factorial = logfactorial(y)
+
         @inbounds for i in 1:n_particles
             new_value = max(value[i] + level_sd * standard_normals[i, t], level2)
 
@@ -184,23 +218,34 @@ function differentiable_particle_loglikelihood(::Val{LocalLevelCountStockout}, Î
 
             # Update step: weight each regime hypothesis by its
             # observation density at this particle's own (just-transitioned)
-            # level, in log space to avoid underflow in either tail before
-            # combining them (the same log-sum-exp treatment used below for
-            # resampling/final normalization).
+            # level. predicted_b1/predicted_b2 are already plain
+            # (non-log) probabilities with no underflow risk of their own
+            # (they're convex combinations of the previous belief), so
+            # unlike an earlier version of this function, there's no need
+            # to log-transform them just to fold them into a log-sum-exp:
+            # only the observation *log*-likelihoods (which can genuinely
+            # be very negative) need the max-subtraction treatment. This
+            # is the same log(a*exp(x) + b*exp(y)) identity as the
+            # resampling/final normalization below, just with two terms
+            # instead of n_particles, and it computes the same
+            # log_mixture_lik/belief update as before (algebraically -- the
+            # log-sum-exp reference point m can be any value that avoids
+            # over/underflow, not necessarily one that also folds in
+            # predicted_b1/predicted_b2, so this is a pure speed
+            # simplification, not a change in what's computed) using 2 exp
+            # + 1 log + 2 (cheap) divisions instead of the previous 3 log +
+            # 4 exp.
             lambda = new_value * one_minus_od_over_one_minus_zi
-            log_lik_in_stock = log_zigp_pmf(y, lambda, overdispersion, zero_inflation)
-            log_lik_stockout = log_poisson_pmf(y, level2)
+            log_lik_in_stock = log_zigp_pmf(y, lambda, overdispersion, zero_inflation, log_one_minus_zi, log_k_factorial)
 
-            log_predicted_b1 = log(predicted_b1)
-            log_predicted_b2 = log(predicted_b2)
-            joint1 = log_predicted_b1 + log_lik_in_stock
-            joint2 = log_predicted_b2 + log_lik_stockout
-            m = max(joint1, joint2)
-            log_mixture_lik = m + log(exp(joint1 - m) + exp(joint2 - m))
+            m = max(log_lik_in_stock, log_lik_stockout)
+            term1 = predicted_b1 * exp(log_lik_in_stock - m)
+            term2 = predicted_b2 * exp(log_lik_stockout - m)
+            s = term1 + term2
 
-            log_weights[i] += log_mixture_lik
-            belief1[i] = exp(joint1 - log_mixture_lik)
-            belief2[i] = exp(joint2 - log_mixture_lik)
+            log_weights[i] += m + log(s)
+            belief1[i] = term1 / s
+            belief2[i] = term2 / s
             value[i] = new_value
         end
 
@@ -283,6 +328,54 @@ incumbent starting point for the same 4 parameters.
 Returns (fitted LocalLevelCountStockout, iterations_used, total_n_feval,
 total_n_geval) -- see LocalLevel's fit_gradient docstring for what these
 mean.
+
+# Performance
+
+The first CI-validated version of this model's fit (accurate, matching
+bboptimize2's own reference-nll) took ~42s against bboptimize2's own
+~5.1s, a real regression relative to LocalLevel's ~10x *speedup* over the
+same baseline. Real CI counts ruled out allocation/GC pressure as the
+cause this time (unlike the LocalLevel/LocalLevelChange history -- see
+DifferentiableLocalLevel.jl's docstring): the per-resampling-event buffer
+pattern here is identical to those already-fast models'. The actual cause
+was `differentiable_particle_loglikelihood`'s per-particle-per-timestep
+inner loop redundantly recomputing several values that don't depend on
+the particle index at all -- `log(1 - zero_inflation)`, the entire
+stockout-branch density `log_poisson_pmf(y, level2)`, and
+`logfactorial(y)` -- tens of thousands of times per loss/gradient
+evaluation (`n_particles x T`) instead of once (see
+`differentiable_particle_loglikelihood`'s hoisted `log_one_minus_zi`/
+`log_lik_stockout`/`log_k_factorial` and `log_zigp_pmf`'s docstring).
+Compounding this: every one of those redundant calls runs under
+ForwardDiff with `Dual` numbers carrying all 7 parameters' partial
+derivatives, so each `log`/`exp` call here costs several times what the
+same call would under LocalLevel's 3-parameter Duals -- a cost this
+model's per-particle math was already paying more of in the first place
+(a Poisson/ZIGP log-density and a 2-state belief mixture, vs LocalLevel's
+handful of pure `+`/`-`/`*`/`/` operations with no transcendental calls at
+all in its inner loop). Eliminating the redundant calls also simplified
+the belief-mixture step itself from 3 `log` + 4 `exp` calls per particle
+down to 1 `log` + 2 `exp` (plus 2 divisions), by working with
+`predicted_b1`/`predicted_b2` directly instead of `log`-transforming them
+first -- an algebraically equivalent, purely cheaper way to compute the
+same log-sum-exp (any finite reference point works for that identity, not
+specifically one that folds in the belief terms).
+
+This does not fully close the gap to bboptimize2's wall time by itself --
+7 parameters means every remaining Dual-typed operation still costs
+~2.3x a 3-parameter one under ForwardDiff (one partial derivative slot
+per parameter, propagated through every arithmetic and transcendental
+operation in the computation graph), which is the single largest
+remaining structural cost and is inherent to *forward*-mode
+differentiation scaling with the number of *inputs*: a reverse-mode AD
+tool (e.g. Zygote.jl/ReverseDiff.jl/Enzyme.jl, none of which this package
+currently depends on) would compute this same 7-dimensional gradient in a
+roughly constant multiple of one forward pass regardless of parameter
+count, which is the more fundamental fix if further speedup is wanted --
+not attempted here since it's a new, heavier dependency with its own
+Julia-1.8-compatibility risk (see `lbfgs`'s docstring for why Optim.jl
+itself was already ruled out for a related reason) that deserves
+validating deliberately rather than folding into this fix.
 """
 function fit_gradient(::Val{LocalLevelCountStockout}, values; particle_count=200, maxiter=200, tol::Real=1e-6, resample_every::Int=0, max_backtracks::Int=20, rng=Random.default_rng())
     loss = get_loss_function_gradient(Val{LocalLevelCountStockout}(), values; particle_count=particle_count, resample_every=resample_every, rng=rng)
